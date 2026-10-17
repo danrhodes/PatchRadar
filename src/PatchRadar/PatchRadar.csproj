@@ -6,6 +6,36 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
+    <ApplicationIcon>..\..\assets\app.ico</ApplicationIcon>
+    <AssemblyName>PatchRadar</AssemblyName>
+    <RootNamespace>PatchRadar</RootNamespace>
+    <Product>PatchRadar</Product>
+    <UpdateFlavour Condition="'$(UpdateFlavour)' == ''">full</UpdateFlavour>
   </PropertyGroup>
 
+  <ItemGroup>
+    <PackageReference Include="H.NotifyIcon.Wpf" Version="2.4.1" />
+    <PackageReference Include="HtmlAgilityPack" Version="1.13.1" />
+    <PackageReference Include="System.Management" Version="10.0.13" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>UpdateFlavour</_Parameter1>
+      <_Parameter2>$(UpdateFlavour)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="System.Net.Http" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="..\..\assets\tray-*.ico" Link="Assets\%(Filename)%(Extension)" />
+    <Resource Include="..\..\assets\app.ico" Link="Assets\app.ico" />
+  </ItemGroup>
+
 </Project>
+
+
+

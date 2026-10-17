@@ -1,0 +1,152 @@
+name: Build and Release
+
+# Push to main  -> pre-release (unsigned; the in-app updater ignores pre-releases on the Stable channel).
+# Manual run    -> full release: pick patch / minor / major, the workflow tags the next version.
+# Pattern copied from danrhodes/Ticktower. Code signing (SignPath, full releases only) is added in P2.10.
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: "Release type"
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      # Projects are named explicitly rather than relying on solution discovery.
+      - name: Test
+        run: dotnet test tests/PatchRadar.Tests -c Release
+
+      # The version lives in git tags only. Latest full release = newest vX.Y.Z tag (no suffix).
+      - name: Work out version
+        id: v
+        run: |
+          git fetch --tags --force
+          $last = git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | Where-Object { $_ -match '^v\d+\.\d+\.\d+$' } |
+              Sort-Object { [version]$_.TrimStart('v') } | Select-Object -Last 1
+          $cur = if ($last) { [version]$last.TrimStart('v') } else { [version]'0.0.0' }
+
+          if ('${{ github.event_name }}' -eq 'workflow_dispatch') {
+            switch ('${{ github.event.inputs.release_type }}') {
+              'major' { $next = "$($cur.Major + 1).0.0" }
+              'minor' { $next = "$($cur.Major).$($cur.Minor + 1).0" }
+              'patch' { $next = "$($cur.Major).$($cur.Minor).$($cur.Build + 1)" }
+            }
+            $full = 'true'
+          } else {
+            # Count existing pre-release tags, including ones whose releases were deleted.
+            $base = "$($cur.Major).$($cur.Minor).$($cur.Build)"
+            $count = @(git tag -l "v$base-pre-release.*").Count
+            $sha = '${{ github.sha }}'.Substring(0, 7)
+            $next = "$base-pre-release.$($count + 1)-$sha"
+            $full = 'false'
+          }
+          "version=$next" >> $env:GITHUB_OUTPUT
+          "tag=v$next" >> $env:GITHUB_OUTPUT
+          "full=$full" >> $env:GITHUB_OUTPUT
+          "last=$last" >> $env:GITHUB_OUTPUT
+          Write-Host "Previous full release: '$last'  ->  new: v$next"
+
+      - name: Generate changelog
+        run: |
+          # Full releases list everything since the previous full release; pre-releases since the previous tag.
+          $since = if ('${{ steps.v.outputs.full }}' -eq 'true') { '${{ steps.v.outputs.last }}' }
+                   else { git describe --tags --abbrev=0 2>$null }
+          $range = if ($since) { "$since..HEAD" } else { 'HEAD' }
+          $commits = git log --pretty=format:"- %s (%h)" $range
+          $notes = @()
+          if ('${{ steps.v.outputs.full }}' -ne 'true') { $notes += "**Unsigned pre-release.**"; $notes += "" }
+          $notes += "### Changes"
+          if ($commits) { $notes += $commits } else { $notes += "- No changes" }
+          $notes | Set-Content changelog.txt -Encoding utf8
+
+      # Self-contained: servers often lack the runtime. Slim: framework-dependent.
+      # UpdateFlavour is baked in so the in-app updater picks the matching asset.
+      - name: Publish
+        run: |
+          $ver = '${{ steps.v.outputs.version }}'
+          $tag = '${{ steps.v.outputs.tag }}'
+          dotnet publish src/PatchRadar -c Release -r win-x64 --self-contained true `
+            -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:Version=$ver -p:UpdateFlavour=full -o publish/full
+          dotnet publish src/PatchRadar -c Release -r win-x64 --self-contained false `
+            -p:PublishSingleFile=true -p:Version=$ver -p:UpdateFlavour=slim -o publish/slim
+          New-Item -ItemType Directory -Force publish/out | Out-Null
+          Copy-Item publish/full/PatchRadar.exe "publish/out/PatchRadar-$tag-win-x64.exe"
+          Copy-Item publish/slim/PatchRadar.exe "publish/out/PatchRadar-$tag-win-x64-slim.exe"
+
+      # Generated after any signing step: signing changes the hash. Format: "<hash>  <filename>".
+      - name: Checksums
+        run: |
+          Get-ChildItem publish/out -Filter *.exe | ForEach-Object {
+            $h = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$h  $($_.Name)" | Set-Content "$($_.FullName).sha256" -Encoding ascii
+          }
+          Get-ChildItem publish/out | Format-Table Name, Length
+
+      # Verify with: gh attestation verify <exe> --repo danrhodes/PatchRadar
+      - name: Attest release assets
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: publish/out/*.exe
+
+      - name: Create release
+        uses: ncipollo/release-action@v1
+        with:
+          artifacts: publish/out/*
+          tag: ${{ steps.v.outputs.tag }}
+          commit: ${{ github.sha }}
+          name: PatchRadar ${{ steps.v.outputs.tag }}
+          bodyFile: changelog.txt
+          prerelease: ${{ steps.v.outputs.full != 'true' }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Delete old pre-releases (keep 10)
+        if: steps.v.outputs.full != 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: releases } = await github.rest.repos.listReleases({
+              owner: context.repo.owner, repo: context.repo.repo, per_page: 100
+            });
+            const old = releases
+              .filter(r => r.prerelease && r.tag_name.includes('-pre-release.'))
+              .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+              .slice(10);
+            for (const r of old) {
+              await github.rest.repos.deleteRelease({ owner: context.repo.owner, repo: context.repo.repo, release_id: r.id });
+              try {
+                await github.rest.git.deleteRef({ owner: context.repo.owner, repo: context.repo.repo, ref: `tags/${r.tag_name}` });
+              } catch (e) { console.log(`Could not delete tag ${r.tag_name}: ${e.message}`); }
+            }

@@ -1,4 +1,4 @@
-﻿# PatchRadar â€” Tracker
+# PatchRadar â€” Tracker
 
 Spec: `guide.md`. This file is the live progress record.
 
@@ -14,12 +14,12 @@ Spec: `guide.md`. This file is the live progress record.
 
 | Phase | Priority | State |
 |---|---|---|
-| P1 Core | Urgent + Important | In progress (P1.0, P1.1 done) |
+| P1 Core | Urgent + Important | In progress. P1.0-P1.8 done. P1.9-P1.11 coded, awaiting manual or CI verification. |
 | P2 Complete product | Important, schedule | Not started |
 | P3 Hardening | Urgent, low value | Not started |
 | P4 Polish | Not urgent, not important | Not started |
 
-Last updated: 2026-10-17 (spec written, SignPath added, no code yet).
+Last updated: 2026-10-17 (P1 code written; 74 offline tests pass).
 
 ## Human actions (Dan) â€” start now, lead time about 1 week (unverified)
 
@@ -41,26 +41,29 @@ Last updated: 2026-10-17 (spec written, SignPath added, no code yet).
   Accept: `dotnet build` and `dotnet test` pass on a clean clone.
 - [x] **P1.1 Target framework check.** Confirm .NET 10 supports Windows Server 2016. If not, switch to `net8.0-windows`.
   Accept: result logged in Decisions.
-- [ ] **P1.2 Settings.** `AppSettings` model, defaults, `SettingsStore` (atomic write, corrupt-file recovery, unknown-key preservation).
+- [x] **P1.2 Settings.** `AppSettings` model, defaults, `SettingsStore` (atomic write, corrupt-file recovery, unknown-key preservation).
   Accept: round-trip, corrupt-file and default-fill tests pass.
-- [ ] **P1.3 Installed update collection.** `WuaHistoryProvider`, `QfeProvider`, merger, filters (days, categories, regex, failed).
+- [x] **P1.3 Installed update collection.** `WuaHistoryProvider`, `QfeProvider`, merger, filters (days, categories, regex, failed).
   Accept: lists updates on a real machine in under 3 s. Dedupe tests pass. Standard-user run logged.
-- [ ] **P1.4 KB fixtures.** Save real HTML for 6 KBs plus KB5127648 into `Fixtures/kb/`.
+- [x] **P1.4 KB fixtures.** Save real HTML for 6 KBs plus KB5127648 into `Fixtures/kb/`.
   Accept: fixtures committed. Page structure notes added to Decisions.
-- [ ] **P1.5 KB fetcher and cache.** Source A, rate limit, backoff, TTL cache.
+- [x] **P1.5 KB fetcher and cache.** Source A, rate limit, backoff, TTL cache.
   Accept: cache and backoff tests pass. Live fetch of KB5127648 result (success or block) logged.
-- [ ] **P1.6 KB parser.** Improvements, Known issues, no-issues, Resolved, unknown-structure fallback.
+- [x] **P1.6 KB parser.** Improvements, Known issues, no-issues, Resolved, unknown-structure fallback.
   Accept: all fixture tests pass. KB5127648 yields the Authentication improvement.
-- [ ] **P1.7 Severity engine.** Keywords, change phrases, BehaviourChange, four states.
+- [x] **P1.7 Severity engine.** Keywords, change phrases, BehaviourChange, four states.
   Accept: golden test (KB5127648 = Red) and all rule tests pass.
-- [ ] **P1.8 Icon set.** Generator script. Placeholder-quality is acceptable now, final art in P2.
+- [x] **P1.8 Icon set.** Generator script. Placeholder-quality is acceptable now, final art in P2.
   Accept: `app.ico` and four tray icons render at 16 px.
 - [ ] **P1.9 Tray and menu.** Single instance. Colour-coded menu. Scan now. Startup delay and interval scheduler. Exit.
   Accept: menu lists newest 15 updates with correct colours. Tray icon shows worst severity. No taskbar button.
+  **Status: coded, NOT ticked.** Verified: process starts, no window or taskbar button, second instance exits, settings.json and log created. Not verified: menu colours and tray icon swap (needs eyes on a desktop). Run it, right-click the tray icon, then tick.
 - [ ] **P1.10 Detail window.** Known issues, workaround, behaviour changes, improvements, KB link.
   Accept: clicking KB5127648 shows the NTLMv1 change and a working KB link.
+  **Status: coded, NOT ticked.** Parsed data for KB5127648 is correct (tests), but the window has not been opened by a human. "Mark reviewed" is deliberately left to P3.1.
 - [ ] **P1.11 CI release workflow.** Pre-release on push to `main`. Full release on manual run (patch/minor/major).
   Accept: push creates a pre-release asset. Manual run creates a full release. Old pre-releases pruned to 10. Each exe has a `.sha256` asset.
+  **Status: workflow written, NOT ticked.** Both publish commands succeed locally (self-contained and slim). Needs a push to `main` and a manual run on GitHub to verify.
 
 ## P2 â€” Complete product (schedule)
 
@@ -129,6 +132,10 @@ Last updated: 2026-10-17 (spec written, SignPath added, no code yet).
 | 2026-10-16 | Four states incl. Grey | Unfetched or blocked KBs must not show Green. |
 | 2026-10-16 | Auto-update from `danrhodes/PatchRadar` GitHub Releases, default `Auto`, Stable channel | Requested. Per-user, in-process rename-and-replace, no elevation. |
 | 2026-10-17 | Code signing via SignPath Foundation. Full releases signed, pre-releases unsigned. | Free for OSS. Let's Encrypt cannot sign code. Per-push signing would block on manual approval. |
+| 2026-10-17 | KB page structure (from fixtures): Improvements are `<ul><li><strong>[Category]</strong> text`. Known issues come in three layouts: (a) table with Symptom/Workaround columns, optional Applies to column; (b) `<details><summary>Title</summary>` with bold paragraphs Symptoms / Resolution; (c) `<details>` with tab sections `data-tab="symptom"` and `data-tab="workaround"`. No issues = "not currently aware of any issues". .NET Framework pages use "Summary" not "Improvements". | Fixtures decide (P1.4). Parser handles all three. |
+| 2026-10-17 | Issue counts as Resolved only on "this/the issue has been resolved" or a leading "Resolved". "Partially resolved" stays Active. | KB5127648 USB audio issue is only partially fixed. |
+| 2026-10-17 | Matched keywords (chips) come from active issues and behaviour changes only, not every improvement. | Improvements mention many unrelated keywords; chips would be noise. |
+| 2026-10-17 | `--diag <file> [KB...]` command-line mode added. Headless: times update collection, live-fetches KBs. | Gives acceptance evidence without a UI. |
 | 2026-10-17 | Keep `net10.0-windows`; test project also targets `net10.0-windows` so it can reference the WPF project | Server 2016 support not disproven. |
 
 ## Unverified items log
@@ -136,9 +143,9 @@ Last updated: 2026-10-17 (spec written, SignPath added, no code yet).
 | Item | Result | Date |
 |---|---|---|
 | .NET 10 on Server 2016 | Inconclusive: web search found no Microsoft matrix; AWS Elastic Beanstalk runs .NET 10.0.11 on Server 2016, so it works in practice. Staying on net10.0-windows. Confirm on a real 2016 box in P3.4. | 2026-10-17 |
-| `QueryHistory` as standard user | | |
-| `support.microsoft.com` bot blocking from app | | |
-| KB known-issues layout (table vs prose) | | |
+| `QueryHistory` as standard user | Works. `--diag` as non-elevated user: WUA 343 entries in 209 ms, QFE 6 in 1.4 s, merged list 944 ms total. Win11 26300. | 2026-10-17 |
+| `support.microsoft.com` bot blocking from app | Not blocked. Live fetch of KB5127648 and KB5044281 succeeded with the browser User-Agent, 0.7 to 1.8 s each. One machine, one day. Keep watching. | 2026-10-17 |
+| KB known-issues layout (table vs prose) | All three layouts occur. See Decisions. | 2026-10-17 |
 | Release health page layout | | |
 | Microsoft terms on automated access | | |
 | Rename-running-exe update works on all matrix OSes | | |
@@ -157,4 +164,4 @@ Last updated: 2026-10-17 (spec written, SignPath added, no code yet).
 | 2026-10-16 | Auto-update added to both files (guide 11.1, tracker P2.9, P3.2) | P1.0 |
 | 2026-10-17 | SignPath signing added (guide 11.2, tracker H1â€“H4, P2.10â€“P2.12) | P1.0, Dan does H1 |
 | 2026-10-17 | P1.0 scaffold, P1.1 TFM check | P1.2 |
-
+| 2026-10-17 | P1.2-P1.8 done and ticked. P1.9, P1.10, P1.11 coded, awaiting manual or CI check. 74 tests pass. | Dan: run the app and check the tray. Push to verify CI. Then P2. |
