@@ -54,7 +54,10 @@ public static class KbParser
         data.Structure = improvementsHead is not null || knownHead is not null ? KbStructure.Standard : KbStructure.Unknown;
 
         // Empty shell / bot challenge: nothing recognisable and almost no text.
-        if (improvementsHead is null && knownHead is null && summaryHead is null && data.RawText.Length < 1500)
+        // A real article has an h1 and a "| Microsoft Support" title even when it has no KB sections
+        // (platform and app updates). Only a page with neither is treated as a challenge or empty shell.
+        var looksLikeArticle = title.Length > 0 && doc.DocumentNode.SelectSingleNode("//h1") is not null;
+        if (improvementsHead is null && knownHead is null && summaryHead is null && !looksLikeArticle && data.RawText.Length < 1500)
         {
             data.Status = KbStatus.Blocked;
             data.LastError = "Page has no recognisable KB content (possible bot challenge or empty shell)";

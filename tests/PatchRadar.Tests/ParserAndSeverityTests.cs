@@ -93,6 +93,15 @@ public class ParserTests
     }
 
     [Fact]
+    public void ArticleWithoutKbSections_IsNotBlocked_AndIsUnknownStructure()
+    {
+        var html = "<html><head><title>Windows Security app update | Microsoft Support</title></head><body><main><h1>Windows Security app update</h1><p>Short note.</p></main></body></html>";
+        var d = KbParser.Parse("KB5007651", html, "t", null, DateTime.UtcNow);
+        Assert.Equal(KbStatus.Ok, d.Status);
+        Assert.Equal(KbStructure.Unknown, d.Structure);
+    }
+
+    [Fact]
     public void ContentHash_IsStableAndChangesWithIssueText()
     {
         var a = Fx.Parse("kb5044281");

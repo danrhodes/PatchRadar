@@ -191,6 +191,19 @@ public class KbFetcherTests
     }
 
     [Fact]
+    public async Task NotFound_RetriesOnlyAfterSevenDays()
+    {
+        using var t = new TempDir();
+        var src = new FakeSource(new KbData { Kb = "KB1", Status = KbStatus.NotFound, LastError = "HTTP 404" });
+        var f = new KbFetcher(new[] { src }, new KbCache(t.Path));
+        var r = (await f.GetAsync(Upd(), new ScanningSettings(), false, default))!;
+        Assert.Equal(KbStatus.NotFound, r.Status);
+        Assert.True(r.NextRetryUtc > DateTime.UtcNow.AddDays(6));
+        await f.GetAsync(Upd(), new ScanningSettings(), false, default);
+        Assert.Equal(1, src.Calls);
+    }
+
+    [Fact]
     public async Task AllSourcesFail_StoresGreyDataWithReason()
     {
         using var t = new TempDir();

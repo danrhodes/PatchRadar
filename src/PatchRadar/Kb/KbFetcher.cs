@@ -119,7 +119,7 @@ public sealed class SupportSiteSource : IKbSource
                     return data;
                 }
                 if (code == HttpStatusCode.NotFound)
-                    return Fail(kb, KbStatus.NotFound, "HTTP 404");
+                    return Fail(kb, KbStatus.NotFound, "Microsoft has no KB article for this update (HTTP 404)");
 
                 lastError = $"HTTP {(int)code}";
                 status = code is HttpStatusCode.Forbidden or HttpStatusCode.TooManyRequests ? KbStatus.Blocked : KbStatus.Failed;
@@ -193,7 +193,9 @@ public sealed class KbFetcher
         var failures = (cached?.ConsecutiveFailures ?? 0) + 1;
         var keep = cached is { Status: KbStatus.Ok } ? cached : last ?? new KbData { Kb = update.Kb, Status = KbStatus.Failed, Source = "none" };
         keep.ConsecutiveFailures = failures;
-        keep.NextRetryUtc = now + KbCache.RetryDelay(failures);
+        // 404 means Microsoft has no article for this update: do not hammer the site, look again in a week.
+        var noArticle = last?.Status == KbStatus.NotFound;
+        keep.NextRetryUtc = now + (noArticle ? TimeSpan.FromDays(7) : KbCache.RetryDelay(failures));
         keep.LastError = last?.LastError ?? "No source available";
         if (keep.Status != KbStatus.Ok) keep.FetchedUtc = now;
         _cache.Save(keep);

@@ -71,7 +71,7 @@ public partial class DetailWindow : Window
         var kb = _row.Kb;
         if (kb is null || kb.Status != KbStatus.Ok)
         {
-            Body.Children.Add(Heading("KB data unavailable"));
+            Body.Children.Add(Heading(kb?.Status == KbStatus.NotFound ? "No KB article" : "KB data unavailable"));
             Body.Children.Add(Text(kb?.LastError ?? "Not fetched yet. Use Refresh or Scan now.", 12));
             if (kb?.NextRetryUtc is { } next)
                 Body.Children.Add(Text($"Next automatic retry: {next.ToLocalTime():d MMM HH:mm}", 11, null, Brushes.Gray));
