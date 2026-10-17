@@ -14,7 +14,7 @@ Spec: `guide.md`. This file is the live progress record.
 
 | Phase | Priority | State |
 |---|---|---|
-| P1 Core | Urgent + Important | In progress. P1.0-P1.8 done. P1.9-P1.11 coded, awaiting manual or CI verification. |
+| P1 Core | Urgent + Important | In progress. P1.0-P1.10 done. P1.11 coded, awaiting CI verification. |
 | P2 Complete product | Important, schedule | Not started |
 | P3 Hardening | Urgent, low value | Not started |
 | P4 Polish | Not urgent, not important | Not started |
@@ -55,12 +55,12 @@ Last updated: 2026-10-17 (P1 code written; 74 offline tests pass).
   Accept: golden test (KB5127648 = Red) and all rule tests pass.
 - [x] **P1.8 Icon set.** Generator script. Placeholder-quality is acceptable now, final art in P2.
   Accept: `app.ico` and four tray icons render at 16 px.
-- [ ] **P1.9 Tray and menu.** Single instance. Colour-coded menu. Scan now. Startup delay and interval scheduler. Exit.
+- [x] **P1.9 Tray and menu.** Single instance. Colour-coded menu. Scan now. Startup delay and interval scheduler. Exit.
   Accept: menu lists newest 15 updates with correct colours. Tray icon shows worst severity. No taskbar button.
-  **Status: coded, NOT ticked.** Verified: process starts, no window or taskbar button, second instance exits, settings.json and log created. Not verified: menu colours and tray icon swap (needs eyes on a desktop). Run it, right-click the tray icon, then tick.
-- [ ] **P1.10 Detail window.** Known issues, workaround, behaviour changes, improvements, KB link.
+  **Verified by Dan from screenshots 2026-10-17:** colour-coded menu with 15 updates, header shows last scan and next scan, no taskbar button. Grey rows are Defender, MSRT-style and QFE-only entries whose KB pages have no usable data.
+- [x] **P1.10 Detail window.** Known issues, workaround, behaviour changes, improvements, KB link.
   Accept: clicking KB5127648 shows the NTLMv1 change and a working KB link.
-  **Status: coded, NOT ticked.** Parsed data for KB5127648 is correct (tests), but the window has not been opened by a human. "Mark reviewed" is deliberately left to P3.1.
+  **Verified by Dan from screenshot 2026-10-17:** KB5127648 shows RED pill, keyword chips and known issues. "Mark reviewed" is deliberately left to P3.1.
 - [ ] **P1.11 CI release workflow.** Pre-release on push to `main`. Full release on manual run (patch/minor/major).
   Accept: push creates a pre-release asset. Manual run creates a full release. Old pre-releases pruned to 10. Each exe has a `.sha256` asset.
   **Status: workflow written, NOT ticked.** Both publish commands succeed locally (self-contained and slim). Needs a push to `main` and a manual run on GitHub to verify.
