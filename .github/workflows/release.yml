@@ -99,6 +99,7 @@ jobs:
           $tag = '${{ steps.v.outputs.tag }}'
           dotnet publish src/PatchRadar -c Release -r win-x64 --self-contained true `
             -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:EnableCompressionInSingleFile=true `
             -p:Version=$ver -p:UpdateFlavour=full -o publish/full
           dotnet publish src/PatchRadar -c Release -r win-x64 --self-contained false `
             -p:PublishSingleFile=true -p:Version=$ver -p:UpdateFlavour=slim -o publish/slim

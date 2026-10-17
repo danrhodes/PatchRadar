@@ -136,6 +136,7 @@ Last updated: 2026-10-17 (P1 code written; 74 offline tests pass).
 | 2026-10-17 | Issue counts as Resolved only on "this/the issue has been resolved" or a leading "Resolved". "Partially resolved" stays Active. | KB5127648 USB audio issue is only partially fixed. |
 | 2026-10-17 | Matched keywords (chips) come from active issues and behaviour changes only, not every improvement. | Improvements mention many unrelated keywords; chips would be noise. |
 | 2026-10-17 | HTTP 404 from the KB page = status NotFound ("Microsoft has no KB article for this update"). Retry in 7 days, not 1/6/24 h. A 200 page with an h1 but no KB sections (e.g. KB5007651 Windows Security app update) is a real article: Status Ok, Structure Unknown, no longer mislabelled as a bot block. | Seen on KB5127647, KB4052623 (404) and KB5007651. Defender platform/MSRT-style updates still show Grey; consider adding them to `excludeTitleRegex` defaults (not done, guide lists only two patterns). |
+| 2026-10-17 | Full (self-contained) exe built with `EnableCompressionInSingleFile=true`. | Uncompressed it was 134.5 MB; compressed 62.5 MB. Slightly slower first start. Trimming unsupported for WPF. Helps the SignPath size risk. |
 | 2026-10-17 | `--diag <file> [KB...]` command-line mode added. Headless: times update collection, live-fetches KBs. | Gives acceptance evidence without a UI. |
 | 2026-10-17 | Keep `net10.0-windows`; test project also targets `net10.0-windows` so it can reference the WPF project | Server 2016 support not disproven. |
 
