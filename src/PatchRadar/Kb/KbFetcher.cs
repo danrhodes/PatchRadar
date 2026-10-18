@@ -192,8 +192,9 @@ public sealed class KbFetcher
             first ??= d;
             if (d.Status == KbStatus.Ok)
             {
-                // Source A succeeded: let enrichers add anything it lacks (release health known issues).
-                if (ReferenceEquals(src, _sources[0]))
+                // A full article (source A or the WebView2 render) is in hand: let enrichers add anything
+                // it lacks (release health known issues). Release health itself is not enriched with itself.
+                if (src is not IKbEnricher)
                 {
                     foreach (var e in _enrichers.Where(e => e.IsEnabled))
                     {

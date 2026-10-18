@@ -7,6 +7,7 @@ using PatchRadar.Export;
 using PatchRadar.Infra;
 using PatchRadar.Scan;
 using PatchRadar.Settings;
+using PatchRadar.State;
 
 namespace PatchRadar.Views;
 
@@ -24,6 +25,7 @@ public sealed class AllUpdatesWindow : Window
         public string Category => Row.Update.Category.ToString();
         public string Installed => Row.Update.InstalledOn.LocalDateTime.ToString("yyyy-MM-dd HH:mm");
         public string Result => Row.Update.State.ToString();
+        public string Reviewed => Row.Review switch { ReviewStatus.Reviewed => "Yes", ReviewStatus.ChangedSinceReviewed => "Changed", _ => "" };
         public string Notes => Row.Result.Summary ?? "";
     }
 
@@ -42,6 +44,7 @@ public sealed class AllUpdatesWindow : Window
     };
     private readonly ComboBox _severity = new() { Width = 100 };
     private readonly ComboBox _category = new() { Width = 130 };
+    private readonly ComboBox _review = new() { Width = 170 };
     private readonly DatePicker _from = new() { Width = 150 };
     private readonly DatePicker _to = new() { Width = 150 };
     private readonly TextBox _text = new() { Width = 160 };
@@ -53,6 +56,10 @@ public sealed class AllUpdatesWindow : Window
 
     private const string AnySeverity = "Any risk";
     private const string AnyCategory = "Any category";
+    private const string AnyReview = "Any review state";
+    private const string NotReviewed = "Not reviewed";
+    private const string Reviewed = "Reviewed";
+    private const string Changed = "Changed since reviewed";
 
     public AllUpdatesWindow(ScanService scan, SettingsHost settings, Action<UpdateRow> openDetail, ILog log)
     {
@@ -67,6 +74,8 @@ public sealed class AllUpdatesWindow : Window
         _severity.SelectedIndex = 0;
         _category.ItemsSource = new[] { AnyCategory }.Concat(Enum.GetNames<UpdateCategory>()).ToList();
         _category.SelectedIndex = 0;
+        _review.ItemsSource = new[] { AnyReview, NotReviewed, Reviewed, Changed };
+        _review.SelectedIndex = 0;
 
         var filters = new WrapPanel { Margin = new Thickness(12, 12, 12, 4) };
         void Add(string label, UIElement el)
@@ -75,7 +84,7 @@ public sealed class AllUpdatesWindow : Window
             if (el is FrameworkElement fe) fe.Margin = new Thickness(0, 0, 12, 4);
             filters.Children.Add(el);
         }
-        Add("Risk", _severity); Add("Category", _category); Add("From", _from); Add("To", _to); Add("KB or title", _text);
+        Add("Risk", _severity); Add("Category", _category); Add("Review", _review); Add("From", _from); Add("To", _to); Add("KB or title", _text);
         filters.Children.Add(_allTime);
 
         var symptomRow = new DockPanel { Margin = new Thickness(12, 0, 12, 8) };
@@ -110,6 +119,7 @@ public sealed class AllUpdatesWindow : Window
 
         _severity.SelectionChanged += (_, _) => Refilter();
         _category.SelectionChanged += (_, _) => Refilter();
+        _review.SelectionChanged += (_, _) => Refilter();
         _from.SelectedDateChanged += (_, _) => Refilter();
         _to.SelectedDateChanged += (_, _) => Refilter();
         _text.TextChanged += (_, _) => Refilter();
@@ -161,6 +171,7 @@ public sealed class AllUpdatesWindow : Window
         _grid.Columns.Add(Col("Category", nameof(GridRow.Category), 100));
         _grid.Columns.Add(Col("Installed", nameof(GridRow.Installed), 130));
         _grid.Columns.Add(Col("Result", nameof(GridRow.Result), 80));
+        _grid.Columns.Add(Col("Reviewed", nameof(GridRow.Reviewed), 80));
         _grid.Columns.Add(Col("Notes", nameof(GridRow.Notes), 300));
     }
 
@@ -194,6 +205,7 @@ public sealed class AllUpdatesWindow : Window
         {
             Severity = _severity.SelectedItem is string s && s != AnySeverity ? Enum.Parse<Severity>(s) : null,
             Category = _category.SelectedItem is string k && k != AnyCategory ? Enum.Parse<UpdateCategory>(k) : null,
+            Review = _review.SelectedItem as string switch { NotReviewed => ReviewStatus.None, Reviewed => ReviewStatus.Reviewed, Changed => ReviewStatus.ChangedSinceReviewed, _ => null },
             From = _from.SelectedDate,
             To = _to.SelectedDate,
             Text = _text.Text,

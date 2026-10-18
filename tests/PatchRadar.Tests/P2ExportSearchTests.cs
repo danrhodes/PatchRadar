@@ -390,10 +390,10 @@ public class ToastTrackerTests
     {
         using var t = new TempDir();
         var path = Path.Combine(t.Path, "state.json");
-        File.WriteAllText(path, "{\"reviewed\":{\"KB1\":\"abc\"}}");
+        File.WriteAllText(path, "{\"futureThing\":{\"KB1\":\"abc\"}}");
         new ToastTracker(new StateStore(path)).TakeNew(new[] { Red() }, 30);
         var text = File.ReadAllText(path);
-        Assert.Contains("reviewed", text);
+        Assert.Contains("futureThing", text);
         Assert.Contains("KB5127648", text);
     }
 

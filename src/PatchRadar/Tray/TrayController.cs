@@ -204,6 +204,13 @@ public sealed class TrayController : IDisposable
             var panel = new StackPanel { Orientation = Orientation.Horizontal };
             panel.Children.Add(new TextBlock { Text = "● ", Foreground = brush });
             panel.Children.Add(new TextBlock { Text = SummaryFormatter.MenuText(row), Foreground = brush });
+            if (row.Review == ReviewStatus.Reviewed)
+            {
+                panel.Children.Insert(0, new TextBlock { Text = "✓ " });
+                if (settings.Severity.DimReviewed) panel.Opacity = 0.55;
+            }
+            else if (row.Review == ReviewStatus.ChangedSinceReviewed)
+                panel.Children.Add(new TextBlock { Text = " · changed since reviewed", Foreground = SeverityBrushes.For(Severity.Orange, colors) });
             var item = new MenuItem { Header = panel };
             if (!string.IsNullOrWhiteSpace(row.Result.Summary)) item.ToolTip = row.Result.Summary;
             var captured = row;
@@ -281,7 +288,7 @@ public sealed class TrayController : IDisposable
             existing.Activate();
             return;
         }
-        var win = new DetailWindow(row, Settings.Appearance.Colors, RefreshRowAsync, _log);
+        var win = new DetailWindow(row, Settings.Appearance.Colors, RefreshRowAsync, SetReviewed, _log);
         _details[row.Update.Kb] = win;
         win.Closed += (_, _) => _details.Remove(row.Update.Kb);
         win.Show();
@@ -304,6 +311,16 @@ public sealed class TrayController : IDisposable
         _settingsWindow.Closed += (_, _) => _settingsWindow = null;
         _settingsWindow.Show();
         _settingsWindow.Activate();
+    }
+
+    /// <summary>Detail window button: flip the flag and keep the menu in step.</summary>
+    private UpdateRow SetReviewed(UpdateRow row, bool reviewed)
+    {
+        var updated = _scan.SetReviewed(row, reviewed);
+        var rows = _last.Rows.Select(r => r.Update.Kb == updated.Update.Kb ? updated : r).ToList();
+        _last = _last with { Rows = rows };
+        Refresh();
+        return updated;
     }
 
     private async Task<UpdateRow?> RefreshRowAsync(UpdateRow row)

@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.IO;
 using System.Net;
 using System.Text;
@@ -36,7 +36,18 @@ public partial class App : Application
         if (diagIdx >= 0)
         {
             var outPath = diagIdx + 1 < args.Length ? args[diagIdx + 1] : Path.Combine(Path.GetTempPath(), "patchradar-diag.txt");
-            await RunDiagAsync(outPath, args.Skip(diagIdx + 2).ToArray());
+            var rest = args.Skip(diagIdx + 2).ToArray();
+            await RunDiagAsync(outPath, rest.Where(a => a != "--webview").ToArray(), rest.Contains("--webview"));
+            Shutdown();
+            return;
+        }
+
+        // Prints the Authenticode verdict for a file (used on a clean machine before enabling RequireSignatureOnStable).
+        var verifyIdx = Array.IndexOf(args, "--verify");
+        if (verifyIdx >= 0 && verifyIdx + 2 < args.Length)
+        {
+            var r = new WinTrustVerifier().Verify(args[verifyIdx + 2]);
+            File.WriteAllText(args[verifyIdx + 1], $"{r.Status}|{r.Signer}|{r.Detail}");
             Shutdown();
             return;
         }
@@ -91,8 +102,9 @@ public partial class App : Application
             });
         };
 
-        var scan = BuildScanService(host, _supportClient, _log);
-        var toasts = new ToastTracker(new StateStore(Paths.StateFile, _log));
+        var state = new StateStore(Paths.StateFile, _log);
+        var scan = BuildScanService(host, _supportClient, _log, new ReviewStore(state));
+        var toasts = new ToastTracker(state);
 
         var updater = new AppUpdater(() => host.Current.AppUpdate,
             new GitHubReleaseSource(_githubClient.Get, AppVersion.Running().ToString(), Paths.UpdatesDir, _log),
@@ -155,7 +167,7 @@ public partial class App : Application
         }
     }
 
-    private static ScanService BuildScanService(SettingsHost host, ClientHolder support, ILog log)
+    private static ScanService BuildScanService(SettingsHost host, ClientHolder support, ILog log, ReviewStore reviews)
     {
         var s = host.Current;
         var gate = new RequestGate(s.Network.MaxConcurrent, TimeSpan.FromMilliseconds(500));
@@ -163,16 +175,19 @@ public partial class App : Application
         var releaseHealth = new ReleaseHealthSource(support.Get, gate, OsInfo.Current,
             () => host.Current.Advanced.EnableReleaseHealthFallback, Paths.ReleaseHealthCacheDir, log);
         var cache = new KbCache(Paths.KbCacheDir, log);
-        var fetcher = new KbFetcher(new IKbSource[] { source, releaseHealth }, cache, log, enrichers: new IKbEnricher[] { releaseHealth });
+        // Order: plain request, then (opt-in) a real browser render for the full article, then release health.
+        var webView = new WebViewSource(new WebView2Renderer(Paths.WebViewDir, log), gate, () => host.Current.Advanced.EnableWebView2Fallback, log);
+        var fetcher = new KbFetcher(new IKbSource[] { source, webView, releaseHealth }, cache, log, enrichers: new IKbEnricher[] { releaseHealth });
         var history = new UpdateCollector(new IUpdateHistoryProvider[] { new WuaHistoryProvider(), new QfeProvider() }, log);
-        return new ScanService(history, fetcher, () => host.Current, log);
+        return new ScanService(history, fetcher, () => host.Current, log, reviews);
     }
 
     /// <summary>
     /// Headless check used for acceptance tests: times the update list and live-fetches KBs.
-    /// Usage: PatchRadar.exe --diag out.txt [KB5127648 ...]
+    /// Usage: PatchRadar.exe --diag out.txt [KB5127648 ...] [--webview]
+    /// --webview also renders the first KB through the hidden WebView2 (reports whether the runtime exists).
     /// </summary>
-    private static async Task RunDiagAsync(string outPath, string[] kbs)
+    private static async Task RunDiagAsync(string outPath, string[] kbs, bool webview)
     {
         var sb = new StringBuilder();
         void L(string s) { sb.AppendLine(s); }
@@ -213,6 +228,19 @@ public partial class App : Application
                 var b = await rh.FetchAsync(kb, default);
                 L($"  release health {kb}: status={b.Status} issues={b.KnownIssues.Count} err={b.LastError} {sw3.ElapsedMilliseconds} ms");
                 foreach (var i in b.KnownIssues) L($"    - [{i.Status}] {i.Title}");
+            }
+
+            if (webview)
+            {
+                var renderer = new WebView2Renderer(Paths.WebViewDir);
+                L($"WebView2 runtime available: {renderer.IsAvailable}");
+                if (renderer.IsAvailable)
+                {
+                    var kb = (kbs.Length > 0 ? kbs : new[] { "KB5127648" })[0];
+                    var sw4 = Stopwatch.StartNew();
+                    var d = await new WebViewSource(renderer, gate, () => true).FetchAsync(kb, default);
+                    L($"  WebView2 {kb}: status={d.Status} err={d.LastError} improvements={d.Improvements.Count} issues={d.KnownIssues.Count} {sw4.ElapsedMilliseconds} ms");
+                }
             }
         }
         catch (Exception ex) { L("DIAG FAILED: " + ex); }

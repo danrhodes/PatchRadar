@@ -75,6 +75,7 @@ public static class Paths
 
     public static string SettingsFile => Path.Combine(AppData, "settings.json");
     public static string StateFile => Path.Combine(AppData, "state.json");
+    public static string WebViewDir => Path.Combine(LocalAppData, "webview2");
     public static string UpdatesDir => Path.Combine(LocalAppData, "updates");
     public static string ReleaseHealthCacheDir => Path.Combine(LocalAppData, "cache", "rh");
     public static string KbCacheDir => Path.Combine(LocalAppData, "cache", "kb");

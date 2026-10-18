@@ -16,10 +16,10 @@ Spec: `guide.md`. This file is the live progress record.
 |---|---|---|
 | P1 Core | Urgent + Important | In progress. P1.0-P1.10 done. P1.11 coded, awaiting CI verification. |
 | P2 Complete product | Important, schedule | Code complete except P2.10 and P2.12, which wait on SignPath (H1-H4). |
-| P3 Hardening | Urgent, low value | Not started |
+| P3 Hardening | Urgent, low value | P3.1-P3.3 done. P3.4 needs real machines (use `tools/test-matrix.ps1`). |
 | P4 Polish | Not urgent, not important | Not started |
 
-Last updated: 2026-10-18 (P2 coded; 231 offline tests pass).
+Last updated: 2026-10-18 (P2 coded, P3.1-P3.3 done; 287 offline tests pass).
 
 ## Human actions (Dan) â€” start now, lead time about 1 week (unverified)
 
@@ -118,14 +118,18 @@ Last updated: 2026-10-18 (P2 coded; 231 offline tests pass).
 
 ## P3 â€” Hardening (urgent, low value; delegate or batch)
 
-- [ ] **P3.1 Mark reviewed.** Flag per KB with content-hash change detection.
+- [x] **P3.1 Mark reviewed.** Flag per KB with content-hash change detection.
   Accept: edited known-issue text clears the flag and shows "changed since reviewed".
-- [ ] **P3.2 Updater failure drills.** Corrupt download, hash mismatch, unsigned or wrong-signer exe on Stable, read-only install dir, new exe that crashes on start, AV blocking the rename, GitHub rate limit (403).
+  **Done 2026-10-18:** `ReviewStore` keeps KB + content hash + time in `state.json` (shared, atomic `StateStore.Update` with the toast tracker). Test: editing a cached known-issue text flips Reviewed to "changed since reviewed" until it is reviewed again. Detail window has Mark reviewed / Mark not reviewed and a "changed since reviewed" banner; tray menu shows a tick and dims reviewed items (`dimReviewed`) and tags changed ones; All Updates has a Reviewed column and filter; exports carry the state. Only articles that were fetched can be marked. Reviewing does not change severity.
+- [x] **P3.2 Updater failure drills.** Corrupt download, hash mismatch, unsigned or wrong-signer exe on Stable, read-only install dir, new exe that crashes on start, AV blocking the rename, GitHub rate limit (403).
   Accept: each case logs a clear reason, leaves the running version intact and never leaves the install without a working exe.
-- [ ] **P3.3 WebView2 fallback (source C).** Off by default. Setting to enable.
+  **Done 2026-10-18:** 25 drills in `UpdaterFailureDrillTests`: truncated and dropped downloads, hash mismatch, stale tampered cache, unsigned / wrong signer / tampered on Stable, read-only install dir (at check time and at apply time), new exe that never stays up, AV blocking the rename or quarantining mid-copy, pending.json unwritable, restore blocked (falls back to copy; double fault is logged CRITICAL with the path of the good copy), staged file quarantined, updates folder unwritable, new exe cannot be started, GitHub 403 and 429 with rate-limit reset, 502, hostile asset hosts, recovery on the next check. Each asserts a logged reason and that the old exe is still in place. The drills found and fixed three gaps (see Decisions).
+- [x] **P3.3 WebView2 fallback (source C).** Off by default. Setting to enable.
   Accept: renders a blocked page on a machine with the runtime. Graceful skip without it.
+  **Done 2026-10-18:** `WebViewSource` + `WebView2Renderer` (hidden off-screen window, navigation limited to https `*.microsoft.com`, downloads and pop-ups refused). Off by default. Verified live on this machine (runtime 155.0): KB5127648 rendered through WebView2 gives the same 12 improvements, 3 issues, Red as source A; a true 404 returns NotFound in about 3 s. A missing runtime (simulated with `WEBVIEW2_BROWSER_EXECUTABLE_FOLDER` pointing at an empty folder) reports unavailable and the chain skips it. The page was not actually blocked on this machine, so the challenge-solving path is covered by the fake-renderer tests only.
 - [ ] **P3.4 OS test matrix.** Windows 11, Server 2016, 2019, 2022, 2025. Standard user and admin.
   Accept: matrix filled in below. Failures raised as issues.
+  **Status: NOT ticked (needs real machines).** `tools/test-matrix.ps1 -Exe <PatchRadar exe>` runs on each box and prints the row to paste: OS and elevation, `--diag` (WUA, QFE, merge time, live KB fetch, release health page), a real rename-the-running-exe drill, WinVerifyTrust via the new `--verify <out> <file>` mode, installed .NET runtimes. Needed: Windows 11 admin, Server 2016, 2019, 2022, 2025, each as standard user and admin.
 
 ## P4 â€” Polish (eliminate if time-poor)
 
@@ -139,7 +143,7 @@ Last updated: 2026-10-18 (P2 coded; 231 offline tests pass).
 
 | OS | Std user | Admin | Notes |
 |---|---|---|---|
-| Windows 11 | | | |
+| Windows 11 | PASS 2026-10-18: WUA 344 entries 112 ms, merged list 554 ms, live KB fetch Ok, rename of a running exe OK, WinVerifyTrust OK | | Build 26300 (26H2), `tools/test-matrix.ps1`. Admin run still to do. |
 | Server 2016 | | | |
 | Server 2019 | | | |
 | Server 2022 | | | |
@@ -173,7 +177,13 @@ Last updated: 2026-10-18 (P2 coded; 231 offline tests pass).
 | 2026-10-18 | Off mode: no automatic checks, but the tray's manual Check for app update still works and behaves as Notify. Development builds (version `1.0.0`, no `-p:Version`) skip automatic checks and never auto-apply. | An explicit click is a request; a dev build must not overwrite `bin\Debug`. |
 | 2026-10-18 | Signature check uses WinVerifyTrust with revocation lookups off, then requires `O=SignPath Foundation` in the signer subject. | Servers that cannot reach CRL endpoints would otherwise reject good files; the chain, hash and signer subject checks remain. |
 | 2026-10-18 | CI uploads the two exes directly with `upload-artifact` (the GitHub artifact is already a ZIP) instead of pre-zipping them as the guide worded it; artifact configuration root is `zip-file`. Signing is skipped, with a warning and a note in the release body, when the SignPath secret or variable is missing. | A zip inside the artifact zip would need nested configuration. The gate keeps full releases possible before H3 and H4. |
-| 2026-10-18 | `.signpath/policies/patchradar/release-signing.yml` uses SignPath's documented pipeline-policy keys (`github-build-policies`: `disallow_reruns`, `runners.require_github_hosted`). The docs show no repo, workflow or branch keys, so that restriction is set in SignPath (trusted build system link), not in the file. | Guide 11.2 asked for those restrictions in the file; the format does not support them. |
+| 2026-10-18 | `.signpath/policies/patchradar/release-signing.yml` uses SignPath's documented pipeline-policy keys (`github-build-policies`: `disallow_reruns`, `runners.require_github_hosted`). The docs show no repo, workflow or branch keys, so that restriction is set in SignPath (trusted build system link), not in the file. |
+| 2026-10-18 | Review flag stores the KB content hash (improvements plus known issues). A different hash on a later fetch shows "changed since reviewed" until re-reviewed. A review whose fetch failed this time keeps showing Reviewed. Only fetched (Ok) articles can be reviewed. | Guide section 9 and P3.1. Reviewing is a note to self and does not change severity. |
+| 2026-10-18 | `StateStore.Update` does load, change and save under one lock; the toast tracker and review store both use it. | Two writers on one `state.json` must not overwrite each other with a stale copy. |
+| 2026-10-18 | P3.2 drills found and fixed three gaps: (1) an `IOException` or `UnauthorizedAccessException` while storing or reading the download escaped `CheckAsync` (now a Failed outcome with the folder named); (2) a failure to start the new exe after the swap threw (now an Applied outcome telling the user to restart manually; pending.json stays so the health check still runs); (3) if the restore rename was blocked the installer gave up (now it retries by copy before logging CRITICAL). | The invariant "never leave the install without a working exe". |
+| 2026-10-18 | Fetch chain order is now: support site, WebView2 (opt-in), release health. Enrichment from release health applies to any full article, from source A or WebView2. WebView2 reports HTTP status, and 404 maps to NotFound like source A. Package `Microsoft.Web.WebView2` 1.0.4258.31. | WebView2 gives the whole article; release health only gives known issues, so it should come last. |
+| 2026-10-18 | `--verify <outfile> <exe>` prints the Authenticode verdict via the same `WinTrustVerifier` the updater uses. | Lets the first signed release be checked on a clean machine before `RequireSignatureOnStable` is flipped (P2.12), and feeds the OS matrix. |
+| 2026-10-18 | Observed, not changed: `support.microsoft.com/help/1` redirects to a learn.microsoft.com landing page with status 200, so a bogus KB number parses as an Ok article with unknown structure (same in source A and WebView2). Real KB numbers are unaffected. | Noted for P4 if it ever matters. | Guide 11.2 asked for those restrictions in the file; the format does not support them. |
 
 ## Unverified items log
 
@@ -203,3 +213,4 @@ Last updated: 2026-10-18 (P2 coded; 231 offline tests pass).
 | 2026-10-17 | P1.0 scaffold, P1.1 TFM check | P1.2 |
 | 2026-10-17 | P1.2-P1.8 done and ticked. P1.9, P1.10, P1.11 coded, awaiting manual or CI check. 74 tests pass. | Dan: run the app and check the tray. Push to verify CI. Then P2. |
 | 2026-10-18 | P2.1-P2.9, P2.11 done and ticked; P2.10 and P2.12 coded and waiting on SignPath. 231 tests pass. | Dan: eyeball the tray menu and a real toast; push to verify CI (P1.11). Then P3. |
+| 2026-10-18 | P3.1-P3.3 done and ticked (287 tests). P3.4 helper script written; Windows 11 standard-user row filled. | Dan: run `tools/test-matrix.ps1` on the Servers and an elevated Windows 11 for P3.4; push to verify CI (P1.11); do H1-H4. |

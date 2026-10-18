@@ -2,6 +2,7 @@ using PatchRadar.Core;
 using PatchRadar.Infra;
 using PatchRadar.Kb;
 using PatchRadar.Settings;
+using PatchRadar.State;
 using PatchRadar.Updates;
 
 namespace PatchRadar.Scan;
@@ -9,6 +10,8 @@ namespace PatchRadar.Scan;
 public sealed record UpdateRow(InstalledUpdate Update, KbData? Kb, SeverityResult Result)
 {
     public Severity Severity => Result.Severity;
+    public ReviewStatus Review { get; init; }
+    public DateTime? ReviewedUtc { get; init; }
 }
 
 public sealed record ScanResult(IReadOnlyList<UpdateRow> Rows, DateTime ScannedAt, int Fetched, int Failed)
@@ -33,9 +36,11 @@ public sealed class ScanService
     private readonly Func<AppSettings> _settings;
     private readonly ILog _log;
     private readonly SemaphoreSlim _scanLock = new(1, 1);
+    private readonly ReviewStore? _reviews;
 
-    public ScanService(IUpdateHistoryProvider history, KbFetcher fetcher, Func<AppSettings> settings, ILog? log = null)
+    public ScanService(IUpdateHistoryProvider history, KbFetcher fetcher, Func<AppSettings> settings, ILog? log = null, ReviewStore? reviews = null)
     {
+        _reviews = reviews;
         _history = history;
         _fetcher = fetcher;
         _settings = settings;
@@ -51,7 +56,8 @@ public sealed class ScanService
         var all = await _history.GetAsync(ct).ConfigureAwait(false);
         var filtered = UpdateMerger.Filter(all, s.Updates, DateTimeOffset.UtcNow, allTime);
         var engine = new SeverityEngine(s.ToSeverityOptions());
-        return filtered.Select(u => { var kb = _fetcher.GetCached(u.Kb); return new UpdateRow(u, kb, engine.Evaluate(kb)); }).ToList();
+        var snap = Snapshot();
+        return filtered.Select(u => MakeRow(u, _fetcher.GetCached(u.Kb), engine, snap)).ToList();
     }
 
     /// <summary>Force-refresh one update's KB data (Detail window Refresh/Retry).</summary>
@@ -61,7 +67,26 @@ public sealed class ScanService
         var kb = await _fetcher.GetAsync(update, s.Scanning, force: true, ct).ConfigureAwait(false);
         // force only bypasses TTL inside the recent window; honour an explicit user request for older ones too
         var engine = new SeverityEngine(s.ToSeverityOptions());
-        return new UpdateRow(update, kb, engine.Evaluate(kb));
+        return MakeRow(update, kb, engine, Snapshot());
+    }
+
+    private ReviewSnapshot Snapshot() => _reviews?.Snapshot() ?? ReviewSnapshot.Empty;
+
+    private static UpdateRow MakeRow(InstalledUpdate u, KbData? kb, SeverityEngine engine, ReviewSnapshot reviews) =>
+        new(u, kb, engine.Evaluate(kb))
+        {
+            Review = reviews.StatusOf(u.Kb, kb is { Status: KbStatus.Ok } ? kb.ContentHash : null),
+            ReviewedUtc = reviews.ReviewedUtc(u.Kb),
+        };
+
+    /// <summary>Flip one row's reviewed flag and return the updated row.</summary>
+    public UpdateRow SetReviewed(UpdateRow row, bool reviewed)
+    {
+        if (_reviews is null) return row;
+        if (reviewed && row.Kb is { Status: KbStatus.Ok } kb) _reviews.Mark(row.Update.Kb, kb.ContentHash);
+        else if (!reviewed) _reviews.Unmark(row.Update.Kb);
+        var snap = _reviews.Snapshot();
+        return row with { Review = snap.StatusOf(row.Update.Kb, row.Kb is { Status: KbStatus.Ok } k ? k.ContentHash : null), ReviewedUtc = snap.ReviewedUtc(row.Update.Kb) };
     }
 
     /// <summary>
@@ -108,10 +133,11 @@ public sealed class ScanService
             }
 
             var engine = new SeverityEngine(s.ToSeverityOptions());
+            var snap = Snapshot();
             var rows = updates.Select(u =>
             {
                 var kb = results.TryGetValue(u.Kb, out var k) ? k : _fetcher.GetCached(u.Kb);
-                return new UpdateRow(u, kb, engine.Evaluate(kb));
+                return MakeRow(u, kb, engine, snap);
             }).ToList();
             return new ScanResult(rows, DateTime.Now, fetched, failed);
         }

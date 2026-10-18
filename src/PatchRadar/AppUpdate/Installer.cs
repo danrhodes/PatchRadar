@@ -167,6 +167,18 @@ public sealed class UpdateInstaller(IInstallFileOps ops, PendingStore pending, s
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
+            _log.Warn("Restore by rename failed (" + ex.Message + "); trying a copy");
+        }
+
+        // A blocked rename does not always block a copy (an AV scanner may hold the file open for reading only).
+        try
+        {
+            if (ops.Exists(installedExePath)) ops.Delete(installedExePath);
+            ops.Copy(OldPath, installedExePath);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
             _log.Error($"CRITICAL: could not restore {installedExePath} from .old; the previous copy is at {OldPath}", ex);
             return false;
         }

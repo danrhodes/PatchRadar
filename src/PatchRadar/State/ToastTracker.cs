@@ -13,19 +13,19 @@ public sealed class ToastTracker(StateStore store, Func<DateTimeOffset>? now = n
 
     public IReadOnlyList<UpdateRow> TakeNew(IEnumerable<UpdateRow> rows, int recentWindowDays)
     {
-        var state = store.Load();
         var toast = new List<UpdateRow>();
-        var changed = false;
-        foreach (var r in rows)
+        var list = rows.ToList();
+        store.Update(state =>
         {
-            if (r.Severity != Severity.Red || r.Kb is null || r.Kb.ContentHash.Length == 0) continue;
-            if (state.Notified.TryGetValue(r.Update.Kb, out var h) && h == r.Kb.ContentHash) continue;
-            state.Notified[r.Update.Kb] = r.Kb.ContentHash;
-            changed = true;
-            var recent = (_now() - r.Update.InstalledOn) <= TimeSpan.FromDays(recentWindowDays);
-            if (recent) toast.Add(r);
-        }
-        if (changed) store.Save(state);
+            foreach (var r in list)
+            {
+                if (r.Severity != Severity.Red || r.Kb is null || r.Kb.ContentHash.Length == 0) continue;
+                if (state.Notified.TryGetValue(r.Update.Kb, out var h) && h == r.Kb.ContentHash) continue;
+                state.Notified[r.Update.Kb] = r.Kb.ContentHash;
+                var recent = (_now() - r.Update.InstalledOn) <= TimeSpan.FromDays(recentWindowDays);
+                if (recent) toast.Add(r);
+            }
+        });
         return toast;
     }
 }

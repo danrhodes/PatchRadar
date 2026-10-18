@@ -132,6 +132,13 @@ public sealed class AppUpdater
                 _log.Error($"Update {version} rejected: {ex.Message}");
                 return Set(new UpdateOutcome(UpdateOutcomeKind.Failed, version, chosen.HtmlUrl, ex.Message));
             }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Updates folder not writable, disk full, or antivirus holding the downloaded file.
+                _log.Error($"Update {version} could not be stored or read in {_updatesDir}", ex);
+                return Set(new UpdateOutcome(UpdateOutcomeKind.Failed, version, chosen.HtmlUrl,
+                    $"Could not write or read the downloaded update in {_updatesDir}: {ex.Message}"));
+            }
 
             _staged = (chosen, exePath);
             if (!s.ApplyAutomatically)
@@ -162,7 +169,14 @@ public sealed class AppUpdater
         {
             case ApplyResult.Applied:
                 Set(new UpdateOutcome(UpdateOutcomeKind.Applied, version.ToString(), st.Release.HtmlUrl, $"Updating to v{version}…"));
-                _launcher.StartAndExit(_installer.InstalledPath, "--post-update");
+                try { _launcher.StartAndExit(_installer.InstalledPath, "--post-update"); }
+                catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or IOException)
+                {
+                    // The new exe is already in place; the next launch (manual or at login) runs it and the health check still applies.
+                    _log.Error("Update installed but the new exe could not be started", ex);
+                    return Set(new UpdateOutcome(UpdateOutcomeKind.Applied, version.ToString(), st.Release.HtmlUrl,
+                        $"v{version} is installed but could not be started automatically. Restart PatchRadar manually."));
+                }
                 return Last!;
             case ApplyResult.NotWritable:
                 _staged = null;

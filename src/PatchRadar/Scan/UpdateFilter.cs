@@ -1,5 +1,6 @@
 using System.Text;
 using PatchRadar.Core;
+using PatchRadar.State;
 
 namespace PatchRadar.Scan;
 
@@ -12,6 +13,7 @@ public sealed record UpdateFilterCriteria
     public DateTime? To { get; init; }            // inclusive, local date
     public string Text { get; init; } = "";       // KB or title
     public string Symptom { get; init; } = "";    // cached improvements, known issues, workarounds
+    public ReviewStatus? Review { get; init; }
 }
 
 public static class UpdateFilter
@@ -24,6 +26,7 @@ public static class UpdateFilter
         {
             if (c.Severity is { } s && r.Severity != s) return false;
             if (c.Category is { } cat && r.Update.Category != cat) return false;
+            if (c.Review is { } rv && r.Review != rv) return false;
             var local = r.Update.InstalledOn.LocalDateTime.Date;
             if (c.From is { } f && local < f.Date) return false;
             if (c.To is { } t && local > t.Date) return false;

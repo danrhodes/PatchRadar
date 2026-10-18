@@ -28,7 +28,7 @@ public static class Exporters
 public static class CsvExporter
 {
     public static readonly string[] Header =
-        { "Severity", "KB", "Title", "Category", "Installed", "Result", "OS build", "Matched keywords", "Summary", "URL" };
+        { "Severity", "KB", "Title", "Category", "Installed", "Result", "OS build", "Matched keywords", "Summary", "URL", "Reviewed" };
 
     public static string Render(IEnumerable<UpdateRow> rows)
     {
@@ -39,7 +39,7 @@ public static class CsvExporter
             var cells = new[]
             {
                 r.Severity.ToString(), r.Update.Kb, r.Update.Title, r.Update.Category.ToString(), Exporters.Date(r.Update.InstalledOn),
-                Exporters.Result(r), r.Kb?.OsBuild ?? "", string.Join("; ", r.Result.MatchedKeywords), Exporters.Summary(r), UrlGuard.KbUrl(r.Update.Kb),
+                Exporters.Result(r), r.Kb?.OsBuild ?? "", string.Join("; ", r.Result.MatchedKeywords), Exporters.Summary(r), UrlGuard.KbUrl(r.Update.Kb), r.Review.ToString(),
             };
             sb.Append(string.Join(",", cells.Select(Escape))).Append("\r\n");
         }
@@ -73,6 +73,7 @@ public static class JsonExporter
         behaviourChanges = r.Result.BehaviourChanges.Select(c => c.Text),
         knownIssues = r.Result.ActiveIssues.Select(i => new { i.Title, i.AppliesTo, i.Symptom, i.Workaround }),
         kbStatus = r.Kb?.Status.ToString() ?? "NotFetched",
+        review = r.Review.ToString(),
     }), Options);
 }
 

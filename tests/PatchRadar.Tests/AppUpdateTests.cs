@@ -473,6 +473,17 @@ internal sealed class FlakyOps : IInstallFileOps
     public bool IsDirectoryWritable(string d) => Writable && _real.IsDirectoryWritable(d);
 }
 
+internal sealed class CapturingLog : PatchRadar.Infra.ILog
+{
+    public readonly List<string> Lines = new();
+    public void Debug(string m) => Lines.Add("DEBUG " + m);
+    public void Info(string m) => Lines.Add("INFO " + m);
+    public void Warn(string m) => Lines.Add("WARN " + m);
+    public void Error(string m, Exception? ex = null) => Lines.Add("ERROR " + m + (ex is null ? "" : " :: " + ex.Message));
+    public string All => string.Join(Environment.NewLine, Lines);
+    public bool Has(string text) => Lines.Any(l => l.Contains(text, StringComparison.OrdinalIgnoreCase));
+}
+
 internal sealed class UpdaterRig : IDisposable
 {
     public readonly TempDir Dir = new();
@@ -480,6 +491,7 @@ internal sealed class UpdaterRig : IDisposable
     public readonly FakeDownloader Downloader = new();
     public readonly FakeLauncher Launcher = new();
     public readonly FlakyOps Ops = new();
+    public readonly CapturingLog Log = new();
     public readonly PendingStore Pending;
     public readonly UpdateInstaller Installer;
     public readonly AppUpdateSettings Settings = new() { Mode = UpdateMode.Auto, Channel = UpdateChannel.Stable, ApplyAutomatically = true };
@@ -495,11 +507,11 @@ internal sealed class UpdaterRig : IDisposable
         Exe = Path.Combine(InstallDir, "PatchRadar.exe");
         File.WriteAllText(Exe, "OLD-EXE");
         Pending = new PendingStore(UpdatesDir);
-        Installer = new UpdateInstaller(Ops, Pending, Exe);
+        Installer = new UpdateInstaller(Ops, Pending, Exe, Log);
         Verifier = new FakeVerifier(sig ?? new SignatureResult(SignatureStatus.Valid, "O=SignPath Foundation"));
         Releases = releases ?? new FakeReleases();
         Updater = new AppUpdater(() => Settings, Releases, Downloader, Verifier, Installer, Launcher, UpdatesDir,
-            AppVersion.Parse(running), flavour, v => Skipped = v, requireSig);
+            AppVersion.Parse(running), flavour, v => Skipped = v, requireSig, Log);
     }
 
     public FakeVerifier Verifier { get; }

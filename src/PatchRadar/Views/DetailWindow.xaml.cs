@@ -7,6 +7,7 @@ using PatchRadar.Core;
 using PatchRadar.Infra;
 using PatchRadar.Scan;
 using PatchRadar.Settings;
+using PatchRadar.State;
 
 namespace PatchRadar.Views;
 
@@ -14,16 +15,19 @@ namespace PatchRadar.Views;
 public partial class DetailWindow : Window
 {
     private readonly Func<UpdateRow, Task<UpdateRow?>> _refresh;
+    private readonly Func<UpdateRow, bool, UpdateRow> _setReviewed;
     private readonly ColorSettings _colors;
     private readonly ILog _log;
     private UpdateRow _row;
 
-    public DetailWindow(UpdateRow row, ColorSettings colors, Func<UpdateRow, Task<UpdateRow?>> refresh, ILog log)
+    public DetailWindow(UpdateRow row, ColorSettings colors, Func<UpdateRow, Task<UpdateRow?>> refresh,
+        Func<UpdateRow, bool, UpdateRow> setReviewed, ILog log)
     {
         InitializeComponent();
         _row = row;
         _colors = colors;
         _refresh = refresh;
+        _setReviewed = setReviewed;
         _log = log;
         Render();
     }
@@ -60,6 +64,25 @@ public partial class DetailWindow : Window
         var meta = $"Installed {u.InstalledOn.LocalDateTime:d MMM yyyy HH:mm} · {u.State}";
         if (_row.Kb?.OsBuild is { } build) meta += $" · OS build {build}";
         Body.Children.Add(Text(meta, 11, null, Brushes.Gray));
+
+        // A reviewed update whose article has since changed must not look settled.
+        ReviewButton.Content = _row.Review == ReviewStatus.None ? "Mark reviewed" : "Mark not reviewed";
+        ReviewButton.IsEnabled = _row.Review != ReviewStatus.None || _row.Kb is { Status: KbStatus.Ok };
+        if (_row.Review == ReviewStatus.ChangedSinceReviewed)
+        {
+            Body.Children.Add(new Border
+            {
+                Background = new SolidColorBrush(Color.FromArgb(48, 224, 138, 30)),
+                BorderBrush = SeverityBrush(Severity.Orange), BorderThickness = new Thickness(2, 0, 0, 0),
+                Padding = new Thickness(8, 4, 8, 4), Margin = new Thickness(0, 8, 0, 0),
+                Child = Text("Changed since reviewed" + (_row.ReviewedUtc is { } at ? $" on {at.ToLocalTime():d MMM yyyy}" : "") +
+                             ". Microsoft has edited this article. Read it again, then mark it reviewed.", 12, FontWeights.SemiBold),
+            });
+        }
+        else if (_row.Review == ReviewStatus.Reviewed && _row.ReviewedUtc is { } reviewedAt)
+        {
+            Body.Children.Add(Text($"Reviewed {reviewedAt.ToLocalTime():d MMM yyyy HH:mm}", 11, null, Brushes.Gray, new Thickness(0, 4, 0, 0)));
+        }
 
         // Severity pill + keyword chips
         var chips = new WrapPanel { Margin = new Thickness(0, 6, 0, 0) };
@@ -159,6 +182,12 @@ public partial class DetailWindow : Window
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key == Key.Escape) Close();
+    }
+
+    private void Review_Click(object sender, RoutedEventArgs e)
+    {
+        try { Update(_setReviewed(_row, _row.Review == ReviewStatus.None)); }
+        catch (Exception ex) { _log.Error("Mark reviewed failed", ex); }
     }
 
     private void Open_Click(object sender, RoutedEventArgs e) => UrlGuard.OpenInBrowser(UrlGuard.KbUrl(_row.Update.Kb), _log);
