@@ -14,6 +14,8 @@ public sealed record UpdateFilterCriteria
     public string Text { get; init; } = "";       // KB or title
     public string Symptom { get; init; } = "";    // cached improvements, known issues, workarounds
     public ReviewStatus? Review { get; init; }
+    /// <summary>Only updates with a published fix that is not installed on this PC.</summary>
+    public bool FixNotInstalledOnly { get; init; }
 }
 
 public static class UpdateFilter
@@ -27,6 +29,7 @@ public static class UpdateFilter
             if (c.Severity is { } s && r.Severity != s) return false;
             if (c.Category is { } cat && r.Update.Category != cat) return false;
             if (c.Review is { } rv && r.Review != rv) return false;
+            if (c.FixNotInstalledOnly && !r.FixAvailableNotInstalled) return false;
             var local = r.Update.InstalledOn.LocalDateTime.Date;
             if (c.From is { } f && local < f.Date) return false;
             if (c.To is { } t && local > t.Date) return false;
@@ -37,6 +40,15 @@ public static class UpdateFilter
             return true;
         }).ToList();
     }
+
+    /// <summary>
+    /// Most critical-keyword matches first; ties go to the more severe, then the newer update.
+    /// </summary>
+    public static IReadOnlyList<UpdateRow> RankByKeywordHits(IEnumerable<UpdateRow> rows) =>
+        rows.OrderByDescending(r => r.KeywordHits)
+            .ThenBy(r => r.Severity switch { Severity.Red => 0, Severity.Orange => 1, Severity.Green => 2, _ => 3 })
+            .ThenByDescending(r => r.Update.InstalledOn)
+            .ToList();
 
     /// <summary>
     /// Case-insensitive substring over the cached KB text, plus a punctuation-insensitive pass so

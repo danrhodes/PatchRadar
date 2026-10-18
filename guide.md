@@ -509,7 +509,7 @@ Constraints:
 
 ## 14. Non-goals
 
-- Installing, uninstalling or hiding updates.
+- Installing or hiding updates. (Uninstalling was a non-goal; on 2026-10-18 it became an optional, off-by-default, administrator-only, audited feature. See tracker.md.)
 - Windows 10 support.
 - Fleet or RMM reporting.
 - Localisation.

@@ -65,6 +65,7 @@ public sealed class SettingsWindow : Window
     // Advanced
     private readonly ComboBox _logLevel = new() { ItemsSource = Enum.GetNames<Infra.LogLevel>() };
     private readonly CheckBox _releaseHealth = Check("Use Windows release health as a fallback and enrichment source");
+    private readonly CheckBox _uninstall = Check("Allow uninstalling updates (administrators only)");
     private readonly CheckBox _webView2 = Check("Use a hidden WebView2 render when the support site blocks requests (needs the WebView2 runtime)");
 
     public SettingsWindow(SettingsHost host, ILog log)
@@ -130,7 +131,9 @@ public sealed class SettingsWindow : Window
             Row("User-Agent (blank = browser default)", _userAgent),
             Row("Max concurrent requests (applies after restart)", _maxConcurrent))));
 
-        tabs.Items.Add(Tab("Advanced", Stack(Row("Log level", _logLevel), _releaseHealth, _webView2)));
+        tabs.Items.Add(Tab("Advanced", Stack(Row("Log level", _logLevel), _releaseHealth, _webView2,
+            _uninstall,
+            Label("Shows an Uninstall button on updates that Windows can really remove (the newest cumulative update, standalone updates). It is never shown to standard users, never for servicing stack updates, and every removal asks for confirmation and is recorded with your user name and the time. Off by default."))));
 
         var save = MakeButton("Save", Save_Click);
         save.IsDefault = true;
@@ -202,6 +205,7 @@ public sealed class SettingsWindow : Window
         if (_logLevel.SelectedItem is null) _logLevel.SelectedItem = nameof(Infra.LogLevel.Information);
         _releaseHealth.IsChecked = s.Advanced.EnableReleaseHealthFallback;
         _webView2.IsChecked = s.Advanced.EnableWebView2Fallback;
+        _uninstall.IsChecked = s.Advanced.EnableUninstall;
     }
 
     private void Save_Click(object sender, RoutedEventArgs e)
@@ -279,6 +283,7 @@ public sealed class SettingsWindow : Window
         s.Advanced.LogLevel = _logLevel.SelectedItem as string ?? "Information";
         s.Advanced.EnableReleaseHealthFallback = _releaseHealth.IsChecked == true;
         s.Advanced.EnableWebView2Fallback = _webView2.IsChecked == true;
+        s.Advanced.EnableUninstall = _uninstall.IsChecked == true;
 
         if (errors.Count > 0)
         {

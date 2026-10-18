@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using PatchRadar.Kb;
 
 namespace PatchRadar.Core;
 
@@ -68,6 +69,10 @@ public sealed class KbData
     public string? LastError { get; set; }
     /// <summary>Shown in the detail window when the data is partial (for example release-health fallback).</summary>
     public string? Notice { get; set; }
+    /// <summary>The previous reading of this article, kept when its content changed (for before-and-after and the digest).</summary>
+    public KbSnapshot? Previous { get; set; }
+    /// <summary>When the content last changed between two fetches (null if it never has).</summary>
+    public DateTime? ChangedUtc { get; set; }
     public int ConsecutiveFailures { get; set; }
     public DateTime? NextRetryUtc { get; set; }
 }

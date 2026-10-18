@@ -177,6 +177,25 @@ public sealed class KbFetcher
 
     public KbData? GetCached(string kb) => _cache.Load(kb);
 
+    /// <summary>
+    /// Keep the article's edit history across fetches. A real edit (by content, not by hash) stores the old
+    /// reading as <see cref="KbData.Previous"/>; an unchanged article carries the earlier history forward.
+    /// </summary>
+    private static void CarryHistory(KbData? cached, KbData fresh, DateTime now)
+    {
+        if (cached is not { Status: KbStatus.Ok }) return;
+        if (!KbDiff.Compare(cached, fresh).IsEmpty)
+        {
+            fresh.Previous = KbSnapshot.Of(cached, cached.FetchedUtc);
+            fresh.ChangedUtc = now;
+        }
+        else
+        {
+            fresh.Previous = cached.Previous;
+            fresh.ChangedUtc = cached.ChangedUtc;
+        }
+    }
+
     public async Task<KbData?> GetAsync(InstalledUpdate update, ScanningSettings scanning, bool force, CancellationToken ct)
     {
         var cached = _cache.Load(update.Kb);
@@ -204,6 +223,7 @@ public sealed class KbFetcher
                 }
                 d.ConsecutiveFailures = 0;
                 d.NextRetryUtc = null;
+                CarryHistory(cached, d, now);
                 if (cached?.ContentHash == d.ContentHash && cached.Status == KbStatus.Ok) _log.Debug($"{update.Kb}: unchanged");
                 _cache.Save(d);
                 return d;

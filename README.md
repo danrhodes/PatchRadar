@@ -1,4 +1,4 @@
-﻿# PatchRadar
+# PatchRadar
 
 **A tray tool that tells you which Windows update broke it.**
 
@@ -24,7 +24,12 @@ PatchRadar flags it red, because an improvement that matches a *change phrase* (
 - **Colour-coded tray icon and menu.** Green, orange, red or grey for the newest updates. The tray icon shows the worst one.
 - **Known issues with what to do next.** Every issue is a collapsible card with clearly labelled **Symptom**, **Workaround**, **Resolution** and **Fix** sections, plus an **At a glance** summary: how many issues are active, which have a fix or workaround, and which have *nothing published yet*.
 - **Fix tracking.** When an article or Windows release health names the update that fixes an issue (including **out-of-band** and **partial** fixes), PatchRadar links it and tells you whether that update is **already installed on this PC**.
+- **Flags fixes you have not installed.** A tray row, the detail window and the All Updates grid show **⬆ fix available** when Microsoft names a fix (including out-of-band updates) that is not on this PC. If a newer cumulative update is installed, it says that update probably already includes it.
 - **Behaviour-change detection** in the Improvements section.
+- **Before and after.** When Microsoft edits an article you had reviewed, the detail window shows exactly what changed: added, removed and edited issues, workarounds, fixes and improvements, each with a BEFORE and AFTER.
+- **What's changed since I last looked.** One list of new updates, edited articles, updates that became riskier, newly named fixes and reviewed items that changed, with a badge in the tray menu.
+- **Ranked by keyword matches.** Sort the grid by how many of *your* critical keywords an update matches, so the likeliest cause of a symptom rises to the top.
+- **Optional uninstall for administrators** (off by default). Offered only where Windows can really remove the update, with strong warnings, a typed confirmation and an audit record. See [Uninstalling an update](#uninstalling-an-update-advanced-administrators-only).
 - **Symptom search.** Type `wifi`, `NTLM` or `0x80070` and see which updates mention it.
 - **Mark reviewed.** Flag an update as dealt with. If Microsoft later edits the article, PatchRadar shows **changed since reviewed**.
 - **Export** the list as CSV, JSON or a Markdown table that pastes cleanly into a ticket. **Copy summary** puts one update's findings on the clipboard.
@@ -45,6 +50,33 @@ Active issues open by default. Each says whether there is a fix, a workaround or
   <img src="docs/images/detail-light.png" alt="Detail window for KB5127648 with an At a glance summary and collapsible known issue cards" width="520">
 </picture>
 </p>
+
+### A fix you have not installed, and what changed since you reviewed it
+
+The orange **Fix available** chip and the At a glance panel name the fixing update and say it is **not installed on this PC**. After you mark an update reviewed, any later edit by Microsoft is shown as BEFORE and AFTER.
+
+<p align="center">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/detail-changed-dark.png">
+  <img src="docs/images/detail-changed-light.png" alt="Detail window showing changed since reviewed, with before and after text for each edited known issue" width="560">
+</picture>
+</p>
+
+### What's changed
+
+<p align="center">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/digest-dark.png">
+  <img src="docs/images/digest-light.png" alt="What's changed window listing edited articles and new updates" width="520">
+</picture>
+</p>
+
+### Ranking by keyword matches
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/ranked-dark.png">
+  <img src="docs/images/ranked-light.png" alt="All updates ranked by how many critical keywords each matches, with a Fix column" width="100%">
+</picture>
 
 ### Symptom search
 
@@ -104,11 +136,13 @@ Left- or right-click the icon (left-click is configurable). Top to bottom:
 | Item | What it does |
 |---|---|
 | Header | Time of the last scan and the next one. Shows `Scanning… (3/15)` while working. |
-| Update rows | The newest updates (15 by default), newest first. Dot and text are coloured by risk. A tick and dimmed text mean you marked it reviewed. Hover for the first matched issue. Click to open the detail window. |
+| Update rows | The newest updates (15 by default), newest first. Dot and text are coloured by risk. A tick and dimmed text mean you marked it reviewed; **⬆ fix available** means a fix exists that is not installed here; **changed since reviewed** means Microsoft edited an article you had reviewed. Hover for the first matched issue. Click to open the detail window. |
 | Scan now | Rescans and refreshes updates inside the recent window. |
 | View all updates… | The full list with filters and symptom search. |
+| What's changed (N)… | Everything that changed since you last looked. The number counts updates with news. |
 | Export… | CSV, JSON, Markdown, or copy as Markdown. |
 | Settings… | Every setting. Changes apply immediately. |
+| Uninstall history… | Only shown to administrators who turned on uninstalling. Who removed what, and when. |
 | Open log folder | Opens `%LOCALAPPDATA%\PatchRadar\logs`. |
 | Check for app update | Becomes **Restart to update to vX.Y.Z** when an update is staged. |
 | About, Exit | |
@@ -146,15 +180,76 @@ Buttons: **Mark reviewed**, **Open KB article** (your browser), **Copy summary**
 
 ### Finding the update behind a symptom
 
-Open **View all updates…** and use **Symptom search**. It searches the cached improvements, known issues and workarounds of every update. It ignores case and punctuation, so `wifi` finds "Wi-Fi" and `mschapv2` finds "MS-CHAPv2". Hex codes like `0x80070` work as typed. Combine it with the risk, category, review and date filters.
+Open **View all updates…** and use **Symptom search**. It searches the cached improvements, known issues and workarounds of every update. It ignores case and punctuation, so `wifi` finds "Wi-Fi" and `mschapv2` finds "MS-CHAPv2". Hex codes like `0x80070` work as typed. Combine it with the risk, category, review and date filters. Tick **Rank by keyword matches** to order the list by how many of your critical keywords each update matched (the **Hits** column), then by risk, then by date. With the symptom box and the ranking together, the update most likely to explain a symptom is first.
 
-### Reviewing
+### Reviewing and "changed since reviewed"
 
-**Mark reviewed** records the article's content hash. If Microsoft edits the article (a new workaround, a new known issue), the update shows **Changed since reviewed** in the menu, the grid and the detail window until you review it again. Reviewing never changes the risk colour; it is a note to yourself.
+**Mark reviewed** keeps a snapshot of the article as you read it. If Microsoft edits it (a new workaround, a new known issue, a fix named, wording changed), the update shows **Changed since reviewed** in the menu, the grid and the detail window, and the detail window lists every change with **BEFORE** and **AFTER**, until you review it again. The comparison is of the *text*, so a PatchRadar upgrade that re-reads articles differently never raises a false alarm. Reviewing never changes the risk colour; it is a note to yourself.
+
+### What's changed since I last looked
+
+**What's changed…** in the tray menu lists, since the last time you pressed **Mark all as seen** (a week back the first time):
+
+- updates installed since then;
+- articles Microsoft edited, with the first few changes spelled out;
+- updates that **became riskier** (for example Green to Red);
+- a fix that is **now named** for an issue that had none;
+- updates you had reviewed that have changed.
+
+Each has **Open details**. The menu shows how many updates have news.
+
+### Fixes you have not installed
+
+For every issue where an article or Windows release health names a fixing update, PatchRadar checks whether that update is installed. It shows **⬆ fix available** on the tray row, an orange **Fix available** chip and a line in **At a glance** saying *NOT installed on this PC*. This includes issues Microsoft calls resolved: "resolved in KB…" only helps a machine that has that KB. If a newer cumulative update than the affected one is installed, PatchRadar adds that it probably already includes the fix. In the grid, tick **Fix available, not installed** to list only those updates.
 
 ### Exporting
 
 From the tray (all scanned updates) or the All Updates window (the **filtered** list): CSV (opens cleanly in Excel), JSON (full detail), or a Markdown table with KB links. **Copy as Markdown** is the fastest route into a ticket.
+
+## Uninstalling an update (advanced, administrators only)
+
+PatchRadar can remove an update from the machine. It is **off by default** and meant for administrators who have confirmed an update is the cause of a fault.
+
+**Turn it on:** Settings, Advanced, **Allow uninstalling updates**.
+
+**Who sees it.** Only administrators. A standard user never sees the button, the history item or any mention of it, even with the setting on. (Administrators running with the normal limited UAC token count; PatchRadar does not need to be started elevated.)
+
+**Where it appears.** An **Uninstall…** button in an update's detail window, **only where removal is actually possible**. PatchRadar reads the same servicing records Windows uses, so the button is not a guess:
+
+| Update type | Method | Offered? |
+|---|---|---|
+| The **newest** cumulative or security update | `dism /online /remove-package` | Yes. wusa cannot remove these. Only the cumulative part goes; the servicing stack stays. |
+| An **older** cumulative update | | No. Windows has superseded it; only the newest can be removed. |
+| **Servicing stack** updates | | **Never.** They cannot be removed. |
+| Standalone updates Windows lists under Installed updates (for example some .NET Framework updates) | `wusa /uninstall /kb:` | Yes |
+| Defender definitions and platform, Malicious Software Removal Tool | | No. Windows replaces them. |
+| Drivers, Office, modern .NET runtime updates | | No. They are removed elsewhere (Device Manager, Office, Installed apps). |
+| Anything Windows does not list as a removable package | | No |
+
+**The warnings.** Clicking **Uninstall…** opens a confirmation that cannot be clicked through by accident. It tells you, as applicable:
+
+- a fix is available and installing it is usually safer;
+- it is a **security update**, and removing it leaves the PC exposed to what it fixes;
+- whether PatchRadar flagged a problem with it (and if it did not, to be sure it is the cause);
+- only the newest cumulative update can be removed;
+- a restart may be required;
+- Windows Update may install it again, so pause updates if it must stay removed;
+- you will get a Windows permission (UAC) prompt;
+- the exact command that will run;
+- that the action is recorded against your account.
+
+<p align="center">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/uninstall-confirm-dark.png">
+  <img src="docs/images/uninstall-confirm-light.png" alt="Uninstall confirmation listing every warning, the exact command, a reason box and a type-to-confirm field" width="560">
+</picture>
+</p>
+
+You can add a **reason or ticket reference**. The **Uninstall** button stays disabled until you tick the acknowledgement **and type the KB number**. Cancel is the default.
+
+**The audit record.** Every attempt is written to `%LOCALAPPDATA%\PatchRadar\audit\uninstall-audit.jsonl`, one JSON line per event. A removal gets a **Started** line before anything runs and an outcome line afterwards (Succeeded, Succeeded with restart required, Cancelled when the UAC prompt was declined, or Failed with the code). Each line holds the date and time (UTC and local), the **user name** (`DOMAIN\user`), the computer, the KB, the title, the method and exact command, the exit code and your reason. If the record cannot be written, **nothing is run**. **Uninstall history…** in the tray menu shows the log. It is a local record for accountability, not tamper-proof: its owner can edit the file. Forward it to your RMM or SIEM if you need an immutable trail.
+
+**After a removal** PatchRadar rescans. A restart may be needed before Windows stops listing the update. PatchRadar never hides the update from Windows Update for you.
 
 ## How the risk is decided
 
@@ -203,6 +298,7 @@ Settings live in `%APPDATA%\PatchRadar\settings.json`. Use the Settings window, 
 | | `maxConcurrent` | `2` | Applies after a restart. |
 | advanced | `logLevel` | `Information` | |
 | | `enableReleaseHealthFallback` | `true` | Release health as fallback and enrichment. |
+| | `enableUninstall` | `false` | Offer **Uninstall…** to administrators on removable updates. See [Uninstalling an update](#uninstalling-an-update-advanced-administrators-only). |
 | | `enableWebView2Fallback` | `false` | Hidden browser render when the site blocks plain requests. Needs the WebView2 runtime, which is often absent on Servers (skipped cleanly). |
 
 ### Tuning the keywords
@@ -277,7 +373,7 @@ Everything stays on your machine:
 
 To uninstall PatchRadar: exit it, delete the exe and the two folders above, and remove the `PatchRadar` value from `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` (turning off **Run at login** first does this for you).
 
-PatchRadar **reads** update history only. It never installs, uninstalls or hides updates.
+PatchRadar **reads** update history. It installs nothing and never hides updates. The only change it can make to the machine is the optional, administrator-only, audited [uninstall](#uninstalling-an-update-advanced-administrators-only), which is off unless you turn it on.
 
 ## FAQ and troubleshooting
 
@@ -297,7 +393,9 @@ PatchRadar **reads** update history only. It never installs, uninstalls or hides
 
 **Where is the log?** Tray menu, **Open log folder**. Raise detail with `advanced.logLevel` set to `Debug`.
 
-**Can it uninstall a bad update?** Not today. PatchRadar tells you *which* update and what Microsoft says to do; it does not change the machine.
+**Can it uninstall a bad update?** Yes, for administrators who enable it, and only where Windows can really remove the update (usually the newest cumulative update). See [Uninstalling an update](#uninstalling-an-update-advanced-administrators-only). Servicing stack updates and anything else Windows cannot remove never get the button.
+
+**Why is there no Uninstall button?** Uninstalling is off by default, hidden from standard users, and only offered where removal is possible. Check Settings, Advanced, that you are an administrator, and that the update is the newest cumulative update or a standalone package. The reason an update is not removable is in `--diag` output ("Uninstall planner").
 
 **Does it work offline?** The list and any cached KB data do. Fetching articles needs the internet.
 

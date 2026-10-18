@@ -22,6 +22,9 @@ public sealed class AppState
     /// <summary>KB -> review record (guide section 9).</summary>
     public Dictionary<string, ReviewEntry> Reviewed { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>When the user last opened "What's changed".</summary>
+    public DateTime? LastDigestSeenUtc { get; set; }
+
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }
 

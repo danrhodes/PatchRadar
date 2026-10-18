@@ -7,11 +7,31 @@ using PatchRadar.Updates;
 
 namespace PatchRadar.Scan;
 
+/// <summary>An update that Microsoft names as the fix for an issue, and whether this PC has it.</summary>
+public sealed record FixInfo(string Kb, bool Installed, bool OutOfBand, bool Partial, string IssueTitle, bool IssueResolved);
+
 public sealed record UpdateRow(InstalledUpdate Update, KbData? Kb, SeverityResult Result)
 {
     public Severity Severity => Result.Severity;
     public ReviewStatus Review { get; init; }
     public DateTime? ReviewedUtc { get; init; }
+
+    /// <summary>What changed in the article since the user reviewed it (null unless it changed).</summary>
+    public KbDiffResult? ChangeSinceReview { get; init; }
+
+    /// <summary>Every fix Microsoft names for this update's issues (active or already resolved), with install state.</summary>
+    public IReadOnlyList<FixInfo> Fixes { get; init; } = Array.Empty<FixInfo>();
+
+    /// <summary>A newer cumulative or security update is installed, which usually already contains earlier fixes.</summary>
+    public bool NewerCumulativeInstalled { get; init; }
+
+    /// <summary>How many of the user's critical keywords this update matched (used to rank).</summary>
+    public int KeywordHits => Result.MatchedKeywords.Count;
+
+    public IReadOnlyList<FixInfo> FixesNotInstalled => Fixes.Where(f => !f.Installed).ToList();
+
+    /// <summary>A fix is published but not installed here, and no newer cumulative update probably covers it.</summary>
+    public bool FixAvailableNotInstalled => FixesNotInstalled.Count > 0;
 }
 
 public sealed record ScanResult(IReadOnlyList<UpdateRow> Rows, DateTime ScannedAt, int Fetched, int Failed)
@@ -38,12 +58,20 @@ public sealed class ScanService
     private readonly SemaphoreSlim _scanLock = new(1, 1);
     private readonly ReviewStore? _reviews;
     private volatile HashSet<string> _installed = new(StringComparer.OrdinalIgnoreCase);
+    private volatile IReadOnlyList<InstalledUpdate> _installedList = Array.Empty<InstalledUpdate>();
+
+    /// <summary>The installed updates from the last history read (for the uninstall planner and the digest).</summary>
+    public IReadOnlyList<InstalledUpdate> InstalledUpdates => _installedList;
 
     /// <summary>True when this KB is installed on this machine (from the last history read).</summary>
     public bool IsInstalled(string kb) => _installed.Contains(kb);
 
-    private void Remember(IEnumerable<InstalledUpdate> all) =>
-        _installed = new HashSet<string>(all.Where(u => u.State == UpdateState.Installed).Select(u => u.Kb), StringComparer.OrdinalIgnoreCase);
+    private void Remember(IEnumerable<InstalledUpdate> all)
+    {
+        var installed = all.Where(u => u.State == UpdateState.Installed).ToList();
+        _installedList = installed;
+        _installed = new HashSet<string>(installed.Select(u => u.Kb), StringComparer.OrdinalIgnoreCase);
+    }
 
     public ScanService(IUpdateHistoryProvider history, KbFetcher fetcher, Func<AppSettings> settings, ILog? log = null, ReviewStore? reviews = null)
     {
@@ -80,21 +108,43 @@ public sealed class ScanService
 
     private ReviewSnapshot Snapshot() => _reviews?.Snapshot() ?? ReviewSnapshot.Empty;
 
-    private static UpdateRow MakeRow(InstalledUpdate u, KbData? kb, SeverityEngine engine, ReviewSnapshot reviews) =>
-        new(u, kb, engine.Evaluate(kb))
+    private UpdateRow MakeRow(InstalledUpdate u, KbData? kb, SeverityEngine engine, ReviewSnapshot reviews)
+    {
+        var ok = kb is { Status: KbStatus.Ok };
+        var status = reviews.StatusOf(u.Kb, ok ? kb!.ContentHash : null);
+        KbDiffResult? diff = null;
+        if (status == ReviewStatus.ChangedSinceReviewed && ok && _reviews?.LoadSnapshot(u.Kb) is { } baseline)
         {
-            Review = reviews.StatusOf(u.Kb, kb is { Status: KbStatus.Ok } ? kb.ContentHash : null),
+            // Compare the text, not the hash: a parser upgrade changes hashes without Microsoft editing anything.
+            diff = KbDiff.Compare(baseline, kb!);
+            if (diff.IsEmpty) { status = ReviewStatus.Reviewed; diff = null; }
+        }
+
+        var fixes = new List<FixInfo>();
+        if (ok)
+            foreach (var i in kb!.KnownIssues.Where(i => i.ResolvedInKb is not null))
+                fixes.Add(new FixInfo(i.ResolvedInKb!, IsInstalled(i.ResolvedInKb!), i.OutOfBandFix, i.PartialFix,
+                    string.IsNullOrWhiteSpace(i.Title) ? i.Symptom : i.Title!, i.Status == IssueStatus.Resolved));
+
+        var newer = _installedList.Any(x => x.Kb != u.Kb && x.InstalledOn > u.InstalledOn &&
+                                            x.Category is UpdateCategory.Cumulative or UpdateCategory.Security);
+        return new UpdateRow(u, kb, engine.Evaluate(kb))
+        {
+            Review = status,
             ReviewedUtc = reviews.ReviewedUtc(u.Kb),
+            ChangeSinceReview = diff,
+            Fixes = fixes,
+            NewerCumulativeInstalled = newer,
         };
+    }
 
     /// <summary>Flip one row's reviewed flag and return the updated row.</summary>
     public UpdateRow SetReviewed(UpdateRow row, bool reviewed)
     {
         if (_reviews is null) return row;
-        if (reviewed && row.Kb is { Status: KbStatus.Ok } kb) _reviews.Mark(row.Update.Kb, kb.ContentHash);
+        if (reviewed && row.Kb is { Status: KbStatus.Ok } kb) _reviews.Mark(row.Update.Kb, kb);
         else if (!reviewed) _reviews.Unmark(row.Update.Kb);
-        var snap = _reviews.Snapshot();
-        return row with { Review = snap.StatusOf(row.Update.Kb, row.Kb is { Status: KbStatus.Ok } k ? k.ContentHash : null), ReviewedUtc = snap.ReviewedUtc(row.Update.Kb) };
+        return MakeRow(row.Update, row.Kb, new SeverityEngine(_settings().ToSeverityOptions()), _reviews.Snapshot());
     }
 
     /// <summary>

@@ -26,6 +26,8 @@ public sealed class AllUpdatesWindow : Window
         public string Installed => Row.Update.InstalledOn.LocalDateTime.ToString("yyyy-MM-dd HH:mm");
         public string Result => Row.Update.State.ToString();
         public string Reviewed => Row.Review switch { ReviewStatus.Reviewed => "Yes", ReviewStatus.ChangedSinceReviewed => "Changed", _ => "" };
+        public int Hits => Row.KeywordHits;
+        public string Fix => Row.FixAvailableNotInstalled ? "⬆ " + string.Join(", ", Row.FixesNotInstalled.Select(f => f.Kb).Distinct()) : "";
         public string Notes => Row.Result.Summary ?? "";
     }
 
@@ -49,6 +51,8 @@ public sealed class AllUpdatesWindow : Window
     private readonly DatePicker _to = new() { Width = 150 };
     private readonly TextBox _text = new() { Width = 160 };
     private readonly TextBox _symptom = new() { MinWidth = 260, HorizontalAlignment = HorizontalAlignment.Stretch };
+    private readonly CheckBox _rank = new() { Content = "Rank by keyword matches", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0), ToolTip = "Most critical-keyword matches first, so the updates most likely to cause your symptom rise to the top" };
+    private readonly CheckBox _fixOnly = new() { Content = "Fix available, not installed", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0) };
     private readonly CheckBox _allTime = new() { Content = "All time", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0) };
     private readonly TextBlock _count = new() { Margin = new Thickness(12, 6, 12, 8), Foreground = Brushes.Gray };
     private bool _loading;
@@ -86,6 +90,8 @@ public sealed class AllUpdatesWindow : Window
         }
         Add("Risk", _severity); Add("Category", _category); Add("Review", _review); Add("From", _from); Add("To", _to); Add("KB or title", _text);
         filters.Children.Add(_allTime);
+        filters.Children.Add(_fixOnly);
+        filters.Children.Add(_rank);
 
         var symptomRow = new DockPanel { Margin = new Thickness(12, 0, 12, 8) };
         var label = new TextBlock { Text = "Symptom search", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0), FontWeight = FontWeights.SemiBold };
@@ -125,6 +131,8 @@ public sealed class AllUpdatesWindow : Window
         _text.TextChanged += (_, _) => Refilter();
         _symptom.TextChanged += (_, _) => Refilter();
         _allTime.Click += async (_, _) => await LoadAsync();
+        _fixOnly.Click += (_, _) => Refilter();
+        _rank.Click += (_, _) => Refilter();
         _grid.MouseDoubleClick += (_, e) =>
         {
             if (_grid.SelectedItem is GridRow g && e.OriginalSource is DependencyObject d && IsInRow(d)) _openDetail(g.Row);
@@ -171,6 +179,8 @@ public sealed class AllUpdatesWindow : Window
         _grid.Columns.Add(Col("Category", nameof(GridRow.Category), 100));
         _grid.Columns.Add(Col("Installed", nameof(GridRow.Installed), 130));
         _grid.Columns.Add(Col("Result", nameof(GridRow.Result), 80));
+        _grid.Columns.Add(Col("Hits", nameof(GridRow.Hits), 60));
+        _grid.Columns.Add(Col("Fix", nameof(GridRow.Fix), 110));
         _grid.Columns.Add(Col("Reviewed", nameof(GridRow.Reviewed), 100));
         _grid.Columns.Add(Col("Notes", nameof(GridRow.Notes), 300));
     }
@@ -206,12 +216,14 @@ public sealed class AllUpdatesWindow : Window
             Severity = _severity.SelectedItem is string s && s != AnySeverity ? Enum.Parse<Severity>(s) : null,
             Category = _category.SelectedItem is string k && k != AnyCategory ? Enum.Parse<UpdateCategory>(k) : null,
             Review = _review.SelectedItem as string switch { NotReviewed => ReviewStatus.None, Reviewed => ReviewStatus.Reviewed, Changed => ReviewStatus.ChangedSinceReviewed, _ => null },
+            FixNotInstalledOnly = _fixOnly.IsChecked == true,
             From = _from.SelectedDate,
             To = _to.SelectedDate,
             Text = _text.Text,
             Symptom = _symptom.Text,
         };
         _shown = UpdateFilter.Apply(_all, c);
+        if (_rank.IsChecked == true) _shown = UpdateFilter.RankByKeywordHits(_shown);
         var colours = _settings.Current.Appearance.Colors;
         _grid.ItemsSource = _shown.Select(r => new GridRow(r, SeverityBrushes.For(r.Severity, colours))).ToList();
         _count.Text = $"{_shown.Count} of {_all.Count} updates" + (_symptom.Text.Trim().Length > 0 ? " match the symptom search" : "");

@@ -6,9 +6,11 @@ using System.Windows.Input;
 using System.Windows.Media;
 using PatchRadar.Core;
 using PatchRadar.Infra;
+using PatchRadar.Kb;
 using PatchRadar.Scan;
 using PatchRadar.Settings;
 using PatchRadar.State;
+using PatchRadar.Uninstall;
 
 namespace PatchRadar.Views;
 
@@ -18,12 +20,16 @@ public partial class DetailWindow : Window
     private readonly Func<UpdateRow, Task<UpdateRow?>> _refresh;
     private readonly Func<UpdateRow, bool, UpdateRow> _setReviewed;
     private readonly Func<string, bool> _isInstalled;
+    private readonly UninstallService? _uninstall;
+    private readonly Action? _onUninstalled;
+    private UninstallPlan? _plan;
     private readonly ColorSettings _colors;
     private readonly ILog _log;
     private UpdateRow _row;
 
     public DetailWindow(UpdateRow row, ColorSettings colors, Func<UpdateRow, Task<UpdateRow?>> refresh,
-        Func<UpdateRow, bool, UpdateRow> setReviewed, Func<string, bool> isInstalled, ILog log)
+        Func<UpdateRow, bool, UpdateRow> setReviewed, Func<string, bool> isInstalled, ILog log,
+        UninstallService? uninstall = null, Action? onUninstalled = null)
     {
         InitializeComponent();
         _row = row;
@@ -31,6 +37,8 @@ public partial class DetailWindow : Window
         _refresh = refresh;
         _setReviewed = setReviewed;
         _isInstalled = isInstalled;
+        _uninstall = uninstall;
+        _onUninstalled = onUninstalled;
         _log = log;
         Render();
     }
@@ -68,6 +76,20 @@ public partial class DetailWindow : Window
         if (_row.Kb?.OsBuild is { } build) meta += $" · OS build {build}";
         Body.Children.Add(Text(meta, 11, null, Brushes.Gray));
 
+        // Severity pill + keyword chips
+        var chips = new WrapPanel { Margin = new Thickness(0, 6, 0, 0) };
+        chips.Children.Add(Chip(_row.Severity.ToString().ToUpperInvariant(), SeverityBrush(_row.Severity), Brushes.White));
+        if (_row.FixAvailableNotInstalled)
+            chips.Children.Add(Chip("⬆ Fix available: " + string.Join(", ", _row.FixesNotInstalled.Select(f => f.Kb).Distinct()), SeverityBrush(Severity.Orange), Brushes.White));
+        foreach (var k in _row.Result.MatchedKeywords)
+            chips.Children.Add(Chip(k, new SolidColorBrush(Color.FromArgb(40, 128, 128, 128)), null));
+        Body.Children.Add(chips);
+
+        // The Uninstall button exists only when the feature is on, the user is an administrator, and removal is really possible.
+        _plan = _uninstall?.PlanIfOffered(_row.Update);
+        UninstallButton.Visibility = _plan is null ? Visibility.Collapsed : Visibility.Visible;
+        if (_plan is not null) { UninstallButton.Background = SeverityBrush(Severity.Red); UninstallButton.Foreground = Brushes.White; }
+
         // A reviewed update whose article has since changed must not look settled.
         ReviewButton.Content = _row.Review == ReviewStatus.None ? "Mark reviewed" : "Mark not reviewed";
         ReviewButton.IsEnabled = _row.Review != ReviewStatus.None || _row.Kb is { Status: KbStatus.Ok };
@@ -81,18 +103,13 @@ public partial class DetailWindow : Window
                 Child = Text("Changed since reviewed" + (_row.ReviewedUtc is { } at ? $" on {at.ToLocalTime():d MMM yyyy}" : "") +
                              ". Microsoft has edited this article. Read it again, then mark it reviewed.", 12, FontWeights.SemiBold),
             });
+            if (_row.ChangeSinceReview is { IsEmpty: false } diff) Body.Children.Add(DiffView(diff));
         }
-        else if (_row.Review == ReviewStatus.Reviewed && _row.ReviewedUtc is { } reviewedAt)
+        if (_row.Review == ReviewStatus.Reviewed && _row.ReviewedUtc is { } reviewedAt)
         {
             Body.Children.Add(Text($"Reviewed {reviewedAt.ToLocalTime():d MMM yyyy HH:mm}", 11, null, Brushes.Gray, new Thickness(0, 4, 0, 0)));
         }
 
-        // Severity pill + keyword chips
-        var chips = new WrapPanel { Margin = new Thickness(0, 6, 0, 0) };
-        chips.Children.Add(Chip(_row.Severity.ToString().ToUpperInvariant(), SeverityBrush(_row.Severity), Brushes.White));
-        foreach (var k in _row.Result.MatchedKeywords)
-            chips.Children.Add(Chip(k, new SolidColorBrush(Color.FromArgb(40, 128, 128, 128)), null));
-        Body.Children.Add(chips);
 
         var kb = _row.Kb;
         if (kb is null || kb.Status != KbStatus.Ok)
@@ -146,6 +163,59 @@ public partial class DetailWindow : Window
     }
 
 
+
+    // ---- before and after ------------------------------------------------------------------------
+
+    private Expander DiffView(KbDiffResult diff)
+    {
+        var panel = new StackPanel { Margin = new Thickness(4, 6, 0, 0) };
+        foreach (var c in diff.Changes)
+        {
+            var sign = c.Kind switch { ChangeKind.Added => "+ ADDED", ChangeKind.Removed => "− REMOVED", _ => "~ CHANGED" };
+            var brush = c.Kind switch { ChangeKind.Added => SeverityBrush(Severity.Green), ChangeKind.Removed => SeverityBrush(Severity.Red), _ => SeverityBrush(Severity.Orange) };
+            var box = new StackPanel { Margin = new Thickness(0, 0, 0, 10) };
+            var head = Text("", 12, FontWeights.SemiBold);
+            head.Inlines.Add(new Run(sign + "  ") { Foreground = brush });
+            head.Inlines.Add(new Run($"{c.Area}: {c.Title}"));
+            box.Children.Add(head);
+
+            if (c.Fields is { Count: > 0 })
+                foreach (var f in c.Fields)
+                {
+                    box.Children.Add(Label(f.Field.ToUpperInvariant()));
+                    box.Children.Add(BeforeAfter(f.Before, f.After));
+                }
+            else if (c.Kind == ChangeKind.Changed) box.Children.Add(BeforeAfter(c.Before ?? "", c.After ?? ""));
+            else box.Children.Add(Text(Shorten(c.After ?? c.Before ?? "", 500), 12, null, Brushes.Gray));
+            panel.Children.Add(box);
+        }
+        return new Expander
+        {
+            Header = new TextBlock { Text = $"What changed since you reviewed it ({diff.Summary})", FontSize = 13, FontWeight = FontWeights.SemiBold },
+            Content = panel, IsExpanded = true, Margin = new Thickness(0, 8, 0, 0),
+        };
+    }
+
+    private Border BeforeAfter(string before, string after)
+    {
+        var g = new StackPanel();
+        g.Children.Add(Side("BEFORE", before.Length == 0 ? "(nothing)" : Shorten(before, 600), SeverityBrush(Severity.Red)));
+        g.Children.Add(Side("AFTER", after.Length == 0 ? "(nothing)" : Shorten(after, 600), SeverityBrush(Severity.Green)));
+        return new Border { Child = g };
+    }
+
+    private static Border Side(string label, string text, Brush accent)
+    {
+        var sp = new StackPanel();
+        sp.Children.Add(Text(label, 10, FontWeights.Bold, accent, new Thickness(0, 0, 0, 1)));
+        sp.Children.Add(Text(text, 12));
+        return new Border
+        {
+            BorderBrush = accent, BorderThickness = new Thickness(2, 0, 0, 0), Padding = new Thickness(8, 2, 4, 2),
+            Margin = new Thickness(0, 0, 0, 4), Child = sp,
+        };
+    }
+
     // ---- known issue presentation ------------------------------------------------------------
 
     private static string Plural(int n, string one, string many) => n == 1 ? $"1 {one}" : $"{n} {many}";
@@ -167,22 +237,28 @@ public partial class DetailWindow : Window
             var withWorkaround = active.Where(i => i.Workaround.Length > 0 || i.Resolution.Length > 0).ToList();
             var nothing = active.Where(i => i.ResolvedInKb is null && i.Workaround.Length == 0 && i.Resolution.Length == 0).ToList();
 
-            foreach (var g in withFix.GroupBy(i => i.ResolvedInKb!))
-            {
-                var any = g.First();
-                var installed = _isInstalled(g.Key);
-                var kind = (any.OutOfBandFix ? "out-of-band " : "") + (g.All(i => i.PartialFix) ? "partial fix" : "fix");
-                var line = Text("", 12);
-                line.Inlines.Add(new Run($"{(g.All(i => i.PartialFix) ? "◐" : "✔")} {Plural(g.Count(), "issue", "issues")} addressed by ") { });
-                line.Inlines.Add(KbLink(g.Key));
-                line.Inlines.Add(new Run($" ({kind}). ") { });
-                line.Inlines.Add(new Run(installed ? "Installed on this PC." : "Not installed on this PC.")
-                    { FontWeight = FontWeights.SemiBold, Foreground = installed ? SeverityBrush(Severity.Green) : SeverityBrush(Severity.Orange) });
-                stack.Children.Add(line);
-            }
+            // (fix lines for every issue, active or resolved, are added below the active-issue summary)
             var wonly = withWorkaround.Where(i => i.ResolvedInKb is null).ToList();
             if (wonly.Count > 0) stack.Children.Add(Text($"✔ {Plural(wonly.Count, "issue has", "issues have")} a workaround or mitigation from Microsoft (see below).", 12));
             if (nothing.Count > 0) stack.Children.Add(Text($"✖ {Plural(nothing.Count, "issue has", "issues have")} no fix or workaround published yet.", 12, null, SeverityBrush(Severity.Orange)));
+        }
+
+        // Fixes: one line per fixing update, with whether this PC already has it. Covers resolved issues too,
+        // because "resolved in KB..." only helps a machine that has installed that KB.
+        foreach (var g in _row.Fixes.GroupBy(f => f.Kb))
+        {
+            var first = g.First();
+            var installed = g.All(f => f.Installed);
+            var partial = g.All(f => f.Partial);
+            var line = Text("", 12);
+            line.Inlines.Add(new Run($"{(installed ? "✔" : "⬆")} {Plural(g.Count(), "issue", "issues")} {(partial ? "partly " : "")}fixed by "));
+            line.Inlines.Add(KbLink(g.Key));
+            line.Inlines.Add(new Run(first.OutOfBand ? " (out-of-band). " : ". "));
+            line.Inlines.Add(new Run(installed ? "Installed on this PC." : "NOT installed on this PC.")
+                { FontWeight = FontWeights.SemiBold, Foreground = installed ? SeverityBrush(Severity.Green) : SeverityBrush(Severity.Orange) });
+            if (!installed && _row.NewerCumulativeInstalled)
+                line.Inlines.Add(new Run(" A newer cumulative update is installed and probably already includes it."){ Foreground = Brushes.Gray });
+            stack.Children.Add(line);
         }
 
         return new Border
@@ -209,8 +285,9 @@ public partial class DetailWindow : Window
         var fg = resolved ? Brushes.Gray : null;
 
         var header = new StackPanel { Orientation = Orientation.Horizontal };
-        var tag = resolved ? "RESOLVED" : i.PartialFix ? "PARTIAL FIX" : i.ResolvedInKb is not null ? "FIX AVAILABLE" : i.Workaround.Length + i.Resolution.Length > 0 ? "WORKAROUND" : "ACTIVE";
-        var tagBrush = resolved ? SeverityBrush(Severity.Grey) : i.ResolvedInKb is not null ? SeverityBrush(Severity.Green) : i.Workaround.Length + i.Resolution.Length > 0 ? SeverityBrush(Severity.Orange) : SeverityBrush(Severity.Red);
+        var fixMissing = i.ResolvedInKb is not null && !_isInstalled(i.ResolvedInKb);
+        var tag = resolved && fixMissing ? "FIX NOT INSTALLED" : resolved ? "RESOLVED" : i.PartialFix ? "PARTIAL FIX" : i.ResolvedInKb is not null ? "FIX AVAILABLE" : i.Workaround.Length + i.Resolution.Length > 0 ? "WORKAROUND" : "ACTIVE";
+        var tagBrush = resolved && fixMissing ? SeverityBrush(Severity.Orange) : resolved ? SeverityBrush(Severity.Grey) : i.ResolvedInKb is not null ? SeverityBrush(Severity.Green) : i.Workaround.Length + i.Resolution.Length > 0 ? SeverityBrush(Severity.Orange) : SeverityBrush(Severity.Red);
         header.Children.Add(Chip(tag, tagBrush, Brushes.White));
         var titleBlock = new TextBlock { Text = title, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap, MaxWidth = 380, VerticalAlignment = VerticalAlignment.Center };
         if (fg is not null) titleBlock.Foreground = fg;      // null would override the theme colour with "no brush"
@@ -244,7 +321,7 @@ public partial class DetailWindow : Window
 
         return new Expander
         {
-            Header = header, Content = body, IsExpanded = !resolved,
+            Header = header, Content = body, IsExpanded = !resolved || fixMissing,
             Margin = new Thickness(0, 0, 0, 8),
         };
     }
@@ -294,6 +371,33 @@ public partial class DetailWindow : Window
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key == Key.Escape) Close();
+    }
+
+    private async void Uninstall_Click(object sender, RoutedEventArgs e)
+    {
+        if (_uninstall is null || _plan is null) return;
+        var confirm = new UninstallConfirmWindow(_row, _plan, Environment.UserName) { Owner = this };
+        if (confirm.ShowDialog() != true) return;
+
+        UninstallButton.IsEnabled = false;
+        Title = $"{_row.Update.Kb} - removing…";
+        try
+        {
+            var result = await _uninstall.ExecuteAsync(_row.Update, confirm.Reason, CancellationToken.None);
+            MessageBox.Show(this, result.Message, result.Succeeded ? "Update removed" : "Update not removed",
+                MessageBoxButton.OK, result.Succeeded ? MessageBoxImage.Information : MessageBoxImage.Warning);
+            if (result.Succeeded) _onUninstalled?.Invoke();
+        }
+        catch (Exception ex)
+        {
+            _log.Error("Uninstall failed", ex);
+            MessageBox.Show(this, ex.Message, "Update not removed", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            UninstallButton.IsEnabled = true;
+            Title = $"{_row.Update.Kb} - PatchRadar";
+        }
     }
 
     private void Review_Click(object sender, RoutedEventArgs e)

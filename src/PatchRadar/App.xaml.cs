@@ -11,6 +11,7 @@ using PatchRadar.Scan;
 using PatchRadar.Settings;
 using PatchRadar.State;
 using PatchRadar.Tray;
+using PatchRadar.Uninstall;
 using PatchRadar.Updates;
 using PatchRadar.Views;
 
@@ -103,7 +104,7 @@ public partial class App : Application
         };
 
         var state = new StateStore(Paths.StateFile, _log);
-        var scan = BuildScanService(host, _supportClient, _log, new ReviewStore(state));
+        var scan = BuildScanService(host, _supportClient, _log, new ReviewStore(state, null, Paths.ReviewSnapshotDir));
         var toasts = new ToastTracker(state);
 
         var updater = new AppUpdater(() => host.Current.AppUpdate,
@@ -115,7 +116,9 @@ public partial class App : Application
         _updates = new UpdateCoordinator(updater, () => host.Current.AppUpdate,
             (title, msg, url) => tray?.ShowToast(title, msg, url is null ? null : () => OpenReleasePage(url)), _log);
 
-        tray = _tray = new TrayController(scan, host, toasts, _updates, _log);
+        var uninstall = new UninstallService(new UninstallPlanner(new RegistryCbsPackageSource()), new UacRunner(), new WindowsPrivilegeInfo(),
+            new UninstallAudit(Paths.UninstallAuditFile, _log), () => host.Current, () => scan.InstalledUpdates, _log);
+        tray = _tray = new TrayController(scan, host, toasts, new DigestStore(state), _updates, _log, uninstall);
         _tray.Start();
         _updates.Start();
 
@@ -210,6 +213,15 @@ public partial class App : Application
             var filtered = UpdateMerger.Filter(all, settings.Updates, DateTimeOffset.UtcNow);
             L($"Collector: {all.Count} merged, {filtered.Count} after default filters, {sw.ElapsedMilliseconds} ms");
             foreach (var u in filtered.Take(15)) L($"  {u.Kb}  {u.InstalledOn.LocalDateTime:yyyy-MM-dd}  {u.Category,-14} {u.Source}  {u.Title}");
+
+            // What the Uninstall button would be offered for (read-only: nothing is ever run here).
+            var planner = new UninstallPlanner(new RegistryCbsPackageSource());
+            L($"Uninstall planner (admin-capable: {new WindowsPrivilegeInfo().IsAdminCapable}):");
+            foreach (var u in filtered.Take(15))
+            {
+                var plan = planner.Plan(u);
+                L($"  {u.Kb,-10} {plan.Method,-18} {(plan.CanUninstall ? plan.Command : plan.Reason)}");
+            }
 
             var http = SupportSiteSource.CreateClient(settings.Network);
             var gate = new RequestGate(2, TimeSpan.FromMilliseconds(500));

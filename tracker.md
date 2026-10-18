@@ -18,8 +18,9 @@ Spec: `guide.md`. This file is the live progress record.
 | P2 Complete product | Important, schedule | Code complete except P2.10 and P2.12, which wait on SignPath (H1-H4). |
 | P3 Hardening | Urgent, low value | P3.1-P3.3 done. P3.4 needs real machines (use `tools/test-matrix.ps1`). |
 | P4 Polish | Not urgent, not important | Done 2026-10-18. |
+| P5 Advanced features | Requested 2026-10-18 | Done 2026-10-18 (uninstall needs one real-machine check). |
 
-Last updated: 2026-10-18 (P2 coded, P3.1-P3.3 and P4 done; 290 offline tests pass).
+Last updated: 2026-10-18 (P2, P3.1-P3.3, P4 and P5 done; 386 offline tests pass).
 
 ## Human actions (Dan) â€” start now, lead time about 1 week (unverified)
 
@@ -142,6 +143,16 @@ Last updated: 2026-10-18 (P2 coded, P3.1-P3.3 and P4 done; 290 offline tests pas
 
 ---
 
+## P5 — Advanced features (added 2026-10-18 at Dan's request)
+
+- [x] **P5.1 Fix available, not installed.** Flag when a named fix KB (including out-of-band and partial fixes, and issues Microsoft calls resolved) is not installed on this PC.
+  Accept: tray row, detail chip, At a glance line and a grid column + filter show it; a newer cumulative update adds a "probably already includes it" note. **Done:** `UpdateRow.Fixes`, tests in `ReviewBaselineAndFixTests`, rendered and checked.
+- [x] **P5.2 Rank by keyword matches.** **Done:** Hits column, "Rank by keyword matches" (hits, then risk, then date), exports carry hits and fixes not installed.
+- [x] **P5.3 Before and after for a changed article.** **Done:** `KbDiff` compares text (not hashes); reviewed items keep a snapshot in `cache\reviewed`; every fetch keeps `Previous` + `ChangedUtc`. Detail window lists added/removed/changed with BEFORE and AFTER. A parser upgrade that changes hashes but no text is not reported as an edit (tested).
+- [x] **P5.4 What's changed since I last looked.** **Done:** `DigestBuilder` (new updates, edited articles, became riskier, fix now named, reviewed-then-changed), `DigestStore` (last seen, default a week back), window with Open details and Mark all as seen, count badge in the tray menu.
+- [x] **P5.5 Uninstall KB (opt-in, administrators only).** **Done, never executed for real in testing.** Setting `advanced.enableUninstall` (default off). Button only when the feature is on, the user is an administrator (UAC-limited admins included), and `UninstallPlanner` says removal is possible: newest cumulative update via `dism /online /remove-package`, standalone MSU packages via `wusa /uninstall`; never servicing stack, Defender/MSRT, drivers, Office, modern .NET, older (superseded) cumulative updates, or anything without a removable package. Warning dialog with all risks, exact command, optional reason, acknowledgement and type-the-KB confirmation. Audit JSONL (Started + outcome, time UTC and local, `DOMAIN\user`, machine, KB, method, command, exit code, reason); if the audit write fails nothing runs. 100 tests (planner table, results mapping, privilege classification, gating, audit, confirmation). Read-only check on this machine: only KB5127648 (newest cumulative) is offered, with its real package name.
+  Still to do by a human: one real removal on a test VM (Windows 11 and a Server), to confirm the DISM and wusa exit codes and the UAC flow. See Unverified items.
+
 ## Test matrix (P3.4)
 
 | OS | Std user | Admin | Notes |
@@ -190,6 +201,12 @@ Last updated: 2026-10-18 (P2 coded, P3.1-P3.3 and P4 done; 290 offline tests pas
 | 2026-10-18 | Known issues now carry separate Symptom, Workaround, Resolution and Next steps text plus a structured fix: `ResolvedInKb`, `OutOfBandFix`, `PartialFix`. Parsed from the article labels and from "addressed / resolved in KB..." wording; release health rows fill `ResolvedInKb` too. The detail window leads with an At a glance panel and shows each issue as a collapsible card with a tag (ACTIVE, WORKAROUND, FIX AVAILABLE, PARTIAL FIX, RESOLVED), the fix as a link, and whether the fix KB is installed on this PC. | Dan's screenshot: Workaround and Resolution were one wall of text and nothing said whether a fix existed. Microsoft's own "Resolution" heading sometimes holds mitigation guidance, so it is labelled "per Microsoft" and only a named update counts as a Fix. |
 | 2026-10-18 | About is a real window, and every tray menu action runs after the popup has closed (`ApplicationIdle`). | A `MessageBox` opened inside the menu click was dismissed with the popup. Export save dialogs used the same path. |
 | 2026-10-18 | Uninstalling updates from PatchRadar is NOT built. Guide section 14 lists it as a non-goal. Design notes in the session reply: opt-in setting, elevation on demand, `wusa /uninstall` cannot remove most cumulative updates (needs `DISM /Remove-Package`), confirmation, and never offered for the newest servicing stack. | Waiting for Dan's decision. |
+| 2026-10-18 | Uninstall is built (guide section 14 amended). Method per type: newest cumulative or security update by DISM `/remove-package` (wusa cannot remove combined SSU+LCU packages); standalone MSU packages by `wusa /uninstall /kb:`; nothing for servicing stack, Defender/MSRT, drivers, Office, modern .NET, or superseded cumulative updates. The plan comes from Component Based Servicing in the registry (readable without elevation; state 112 = installed, one installed `Package_for_RollupFix` is the newest), so the button is decided before any prompt. | "Use the best method for each type" and "button only where removal is actually possible". |
+| 2026-10-18 | Admin check is "in the Administrators role OR token elevation type Limited", because a UAC admin running a desktop app has the group as deny-only. The app is not elevated: each removal asks for UAC (`runas`). A standard user sees nothing, and the service refuses to execute for them even if called directly. | Dan: standard users must not see the option. |
+| 2026-10-18 | Every removal writes a Started record before running and an outcome record after (UTC and local time, `DOMAIN\user`, machine, KB, method, exact command, exit code, reason). If the Started record cannot be written, nothing runs. The file is a local, not tamper-proof record; forwarding to a SIEM is the answer for an immutable trail. | Dan: record time, date and user. |
+| 2026-10-18 | The confirmation needs a tick plus the typed KB number; Cancel is the default; the buttons are docked outside the scroll area. Warnings are generated from data (`UninstallConfirmation.Warnings`) and tested. | A casual click must not remove a security update. |
+| 2026-10-18 | Review baselines are content snapshots stored per reviewed KB in `%LOCALAPPDATA%\PatchRadar\cache\reviewed`. "Changed since reviewed" is decided by comparing text; a different hash with identical text stays Reviewed. | The hash changes whenever the parser gains fields (it did today); that must not flip every reviewed update. |
+| 2026-10-18 | Digest "last looked" = the last Mark all as seen, defaulting to 7 days back the first time. Article history is one level deep (`Previous`). | Keeps state small; enough for "what changed lately". |
 
 ## Unverified items log
 
@@ -208,6 +225,7 @@ Last updated: 2026-10-18 (P2 coded, P3.1-P3.3 and P4 done; 290 offline tests pas
 | SignPath artifact size limit vs ~70 MB self-contained exe | | |
 | SignPath action current major version and input names | `signpath/github-action-submit-signing-request` v2: inputs `api-token`, `organization-id`, `project-slug`, `signing-policy-slug`, `artifact-configuration-slug`, `github-artifact-id`, `wait-for-completion(-timeout-in-seconds)`, `output-artifact-directory` confirmed in its action.yml. | 2026-10-18 |
 | `WinVerifyTrust` on Server 2016 with SHA-256 timestamped signature | | |
+| Real uninstall on a test machine (DISM remove-package for the newest cumulative update; wusa for a standalone MSU) | Not run. Planner verified read-only on Win11 26300; commands and exit-code mapping come from documentation. Needs a VM: confirm the UAC prompt, the exit codes, and that the update leaves Installed updates after a restart. | |
 
 ## Session log
 
@@ -221,3 +239,4 @@ Last updated: 2026-10-18 (P2 coded, P3.1-P3.3 and P4 done; 290 offline tests pas
 | 2026-10-18 | P2.1-P2.9, P2.11 done and ticked; P2.10 and P2.12 coded and waiting on SignPath. 231 tests pass. | Dan: eyeball the tray menu and a real toast; push to verify CI (P1.11). Then P3. |
 | 2026-10-18 | P3.1-P3.3 done and ticked (287 tests). P3.4 helper script written; Windows 11 standard-user row filled. | Dan: run `tools/test-matrix.ps1` on the Servers and an elevated Windows 11 for P3.4; push to verify CI (P1.11); do H1-H4. |
 | 2026-10-18 | P4 done. Detail window redesigned (fix, workaround, resolution, installed check). About window fixed. 290 tests. | Dan: P1.11 CI result, H1-H4, P3.4 matrix, decide on uninstall-from-app. |
+| 2026-10-18 | P5 done: fix-not-installed flag, keyword ranking, before/after diff, what's-changed digest, opt-in audited uninstall. 386 tests. | Dan: test one real uninstall on a VM; push; watch CI; H1-H4; P3.4 matrix. |

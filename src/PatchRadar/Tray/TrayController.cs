@@ -12,6 +12,7 @@ using PatchRadar.Infra;
 using PatchRadar.Scan;
 using PatchRadar.Settings;
 using PatchRadar.State;
+using PatchRadar.Uninstall;
 using PatchRadar.Views;
 
 namespace PatchRadar.Tray;
@@ -23,6 +24,9 @@ public sealed class TrayController : IDisposable
     private readonly ScanScheduler _scheduler;
     private readonly SettingsHost _host;
     private readonly ToastTracker _toasts;
+    private readonly DigestStore _digest;
+    private readonly UninstallService? _uninstall;
+    private DigestWindow? _digestWindow;
     private readonly UpdateCoordinator? _updates;
     private readonly ILog _log;
     private readonly Dictionary<string, DetailWindow> _details = new();
@@ -36,8 +40,10 @@ public sealed class TrayController : IDisposable
 
     private AppSettings Settings => _host.Current;
 
-    public TrayController(ScanService scan, SettingsHost host, ToastTracker toasts, UpdateCoordinator? updates, ILog log)
+    public TrayController(ScanService scan, SettingsHost host, ToastTracker toasts, DigestStore digest, UpdateCoordinator? updates, ILog log, UninstallService? uninstall = null)
     {
+        _uninstall = uninstall;
+        _digest = digest;
         _scan = scan;
         _host = host;
         _toasts = toasts;
@@ -204,6 +210,8 @@ public sealed class TrayController : IDisposable
             var panel = new StackPanel { Orientation = Orientation.Horizontal };
             panel.Children.Add(new TextBlock { Text = "● ", Foreground = brush });
             panel.Children.Add(new TextBlock { Text = SummaryFormatter.MenuText(row), Foreground = brush });
+            if (row.FixAvailableNotInstalled)
+                panel.Children.Add(new TextBlock { Text = " · ⬆ fix available", Foreground = SeverityBrushes.For(Severity.Orange, colors) });
             if (row.Review == ReviewStatus.Reviewed)
             {
                 panel.Children.Insert(0, new TextBlock { Text = "✓ " });
@@ -221,6 +229,9 @@ public sealed class TrayController : IDisposable
         menu.Items.Add(new Separator());
         AddItem(menu, "Scan now", () => _ = RunScanAsync(force: true), enabled: !_scanning);
         AddItem(menu, "View all updates…", ShowAllUpdates);
+        var changes = DigestItems();
+        var changedCount = changes.Select(c => c.Row.Update.Kb).Distinct().Count();
+        AddItem(menu, changedCount > 0 ? $"What's changed ({changedCount})…" : "What's changed…", ShowDigest);
 
         var export = new MenuItem { Header = "Export…" };
         void AddExport(string text, Action click)
@@ -236,6 +247,8 @@ public sealed class TrayController : IDisposable
         menu.Items.Add(export);
 
         AddItem(menu, "Settings…", ShowSettings);
+        if (_uninstall is { IsAvailable: true })
+            AddItem(menu, "Uninstall history…", () => new UninstallHistoryWindow(_uninstall.Audit, _log).Show());
         menu.Items.Add(new Separator());
         AddItem(menu, "Open log folder", OpenLogFolder);
         AddUpdateItems(menu);
@@ -295,7 +308,7 @@ public sealed class TrayController : IDisposable
             existing.Activate();
             return;
         }
-        var win = new DetailWindow(row, Settings.Appearance.Colors, RefreshRowAsync, SetReviewed, _scan.IsInstalled, _log);
+        var win = new DetailWindow(row, Settings.Appearance.Colors, RefreshRowAsync, SetReviewed, _scan.IsInstalled, _log, _uninstall, () => _ = RunScanAsync(force: true));
         _details[row.Update.Kb] = win;
         win.Closed += (_, _) => _details.Remove(row.Update.Kb);
         win.Show();
@@ -353,6 +366,20 @@ public sealed class TrayController : IDisposable
             Process.Start(new ProcessStartInfo(FileLog.DefaultDirectory) { UseShellExecute = true });
         }
         catch (Exception ex) { _log.Error("Open log folder failed", ex); }
+    }
+
+    private IReadOnlyList<DigestItem> DigestItems() =>
+        DigestBuilder.Build(_last.Rows, _digest.LastSeenUtc, new SeverityEngine(Settings.ToSeverityOptions()));
+
+    private void ShowDigest()
+    {
+        if (_digestWindow is { IsLoaded: true }) { _digestWindow.Activate(); return; }
+        var since = _digest.LastSeenUtc;
+        _digestWindow = new DigestWindow(DigestItems(), since, Settings.Appearance.Colors, ShowDetail, () => { _digest.MarkSeen(); Refresh(); });
+        _digestWindow.Closed += (_, _) => _digestWindow = null;
+        _digestWindow.Show();
+        _digestWindow.Activate();
+        _digestWindow.Topmost = true; _digestWindow.Topmost = false;
     }
 
     private AboutWindow? _about;
