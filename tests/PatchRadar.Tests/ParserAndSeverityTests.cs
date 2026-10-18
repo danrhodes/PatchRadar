@@ -23,7 +23,7 @@ public class ParserTests
         Assert.Equal(3, d.KnownIssues.Count);
         var rdp = d.KnownIssues.Single(i => i.Title!.StartsWith("Remote Desktop"));
         Assert.Contains("0xC000000D", rdp.Symptom);
-        Assert.Contains("Administrator protection", rdp.Workaround);
+        Assert.Contains("Administrator protection", $"{rdp.Symptom} {rdp.Workaround} {rdp.Resolution} {rdp.NextSteps}");
         // "partially resolved" must not count as Resolved
         Assert.All(d.KnownIssues, i => Assert.Equal(IssueStatus.Active, i.Status));
     }
@@ -217,4 +217,38 @@ public class KeywordMatcherTests
         var m = new KeywordMatcher(new[] { @"re:0x8007\w+", "re:(unclosed" });
         Assert.Equal(new[] { @"re:0x8007\w+" }, m.Match("Error 0x80070005 appears"));
     }
+
+    [Fact]
+    public void Kb5127648_SeparatesResolutionFromSymptom_AndFindsTheOutOfBandFix()
+    {
+        var d = Fx.Parse("kb5127648");
+        var usb = d.KnownIssues.Single(i => i.Title!.StartsWith("USB audio"));
+        Assert.Equal("KB5129195", usb.ResolvedInKb);
+        Assert.True(usb.OutOfBandFix);
+        Assert.True(usb.PartialFix);                       // "partially resolved" in the OOB update
+        Assert.Equal(IssueStatus.Active, usb.Status);
+        Assert.Contains("out-of-band", usb.Resolution, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("out-of-band", usb.Symptom, StringComparison.OrdinalIgnoreCase);
+
+        var sac = d.KnownIssues.Single(i => i.Title!.Contains("Smart App Control"));
+        Assert.Null(sac.ResolvedInKb);                    // registry guidance only: no fix KB
+        Assert.False(sac.OutOfBandFix);
+        Assert.NotEmpty(sac.Resolution);
+    }
+
+    [Fact]
+    public void Kb5055523_FindsAddressedInKb_AndResolvedIssueStaysResolved()
+    {
+        var d = Fx.Parse("kb5055523");
+        var hello = d.KnownIssues.Single(i => i.Title == "Windows Hello");
+        Assert.Equal("KB5055627", hello.ResolvedInKb);
+        Assert.False(hello.OutOfBandFix);
+        Assert.Equal(IssueStatus.Active, hello.Status);     // the fix exists but this update does not include it
+        Assert.Equal(IssueStatus.Resolved, d.KnownIssues.Single(i => i.Title == "Citrix").Status);
+        Assert.Null(d.KnownIssues.Single(i => i.Title == "Noto fonts issue").ResolvedInKb);
+    }
+
+    [Fact]
+    public void Kb5044281_TableIssue_NamesItsFix() =>
+        Assert.Equal("KB5053603", Fx.Parse("kb5044281").KnownIssues.Single().ResolvedInKb);
 }

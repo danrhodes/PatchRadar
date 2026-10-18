@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
 using PatchRadar.Core;
@@ -16,18 +17,20 @@ public partial class DetailWindow : Window
 {
     private readonly Func<UpdateRow, Task<UpdateRow?>> _refresh;
     private readonly Func<UpdateRow, bool, UpdateRow> _setReviewed;
+    private readonly Func<string, bool> _isInstalled;
     private readonly ColorSettings _colors;
     private readonly ILog _log;
     private UpdateRow _row;
 
     public DetailWindow(UpdateRow row, ColorSettings colors, Func<UpdateRow, Task<UpdateRow?>> refresh,
-        Func<UpdateRow, bool, UpdateRow> setReviewed, ILog log)
+        Func<UpdateRow, bool, UpdateRow> setReviewed, Func<string, bool> isInstalled, ILog log)
     {
         InitializeComponent();
         _row = row;
         _colors = colors;
         _refresh = refresh;
         _setReviewed = setReviewed;
+        _isInstalled = isInstalled;
         _log = log;
         Render();
     }
@@ -101,24 +104,13 @@ public partial class DetailWindow : Window
             return;
         }
 
-        // Known issues
+        // At a glance: what is wrong, and is there a way out?
+        Body.Children.Add(AtAGlance(kb));
+
+        // Known issues: one collapsible card each, active ones open, resolved ones closed.
         Body.Children.Add(Heading($"Known issues ({_row.Result.ActiveIssues.Count} active)"));
         if (kb.KnownIssues.Count == 0) Body.Children.Add(Text("Microsoft lists no known issues for this update.", 12, null, Brushes.Gray));
-        foreach (var i in kb.KnownIssues)
-        {
-            var resolved = i.Status == IssueStatus.Resolved;
-            var fg = resolved ? Brushes.Gray : null;
-            var box = new Border { BorderBrush = Brushes.Gray, BorderThickness = new Thickness(2, 0, 0, 0), Padding = new Thickness(8, 0, 0, 0), Margin = new Thickness(0, 0, 0, 8) };
-            var sp = new StackPanel();
-            var head = string.IsNullOrWhiteSpace(i.Title) ? null : i.Title + (resolved ? "  [Resolved]" : "");
-            if (head is not null) sp.Children.Add(Text(head, 12, FontWeights.SemiBold, fg));
-            else if (resolved) sp.Children.Add(Text("[Resolved]", 12, FontWeights.SemiBold, fg));
-            if (!string.IsNullOrWhiteSpace(i.AppliesTo)) sp.Children.Add(Text("Applies to: " + i.AppliesTo, 11, null, Brushes.Gray));
-            sp.Children.Add(Highlighted("Symptom: " + i.Symptom, fg));
-            if (i.Workaround.Length > 0) sp.Children.Add(Highlighted("Workaround: " + i.Workaround, fg));
-            box.Child = sp;
-            Body.Children.Add(box);
-        }
+        foreach (var i in kb.KnownIssues) Body.Children.Add(IssueCard(i));
 
         // Behaviour changes
         if (_row.Result.BehaviourChanges.Count > 0)
@@ -152,6 +144,126 @@ public partial class DetailWindow : Window
             Body.Children.Add(Text(kb.Notice, 11, null, Brushes.Gray, new Thickness(0, 10, 0, 0)));
         Body.Children.Add(Text($"Source: {kb.Source} · fetched {kb.FetchedUtc.ToLocalTime():d MMM HH:mm}", 11, null, Brushes.Gray, new Thickness(0, 12, 0, 0)));
     }
+
+
+    // ---- known issue presentation ------------------------------------------------------------
+
+    private static string Plural(int n, string one, string many) => n == 1 ? $"1 {one}" : $"{n} {many}";
+
+    private Border AtAGlance(KbData kb)
+    {
+        var active = kb.KnownIssues.Where(i => i.Status == IssueStatus.Active).ToList();
+        var stack = new StackPanel();
+        stack.Children.Add(Text("At a glance", 13, FontWeights.SemiBold, null, new Thickness(0, 0, 0, 4)));
+
+        if (active.Count == 0)
+        {
+            stack.Children.Add(Text(kb.KnownIssues.Count == 0 ? "No known issues listed by Microsoft." : "All listed known issues are resolved.", 12));
+        }
+        else
+        {
+            stack.Children.Add(Text($"{Plural(active.Count, "active known issue", "active known issues")}.", 12, FontWeights.SemiBold));
+            var withFix = active.Where(i => i.ResolvedInKb is not null).ToList();
+            var withWorkaround = active.Where(i => i.Workaround.Length > 0 || i.Resolution.Length > 0).ToList();
+            var nothing = active.Where(i => i.ResolvedInKb is null && i.Workaround.Length == 0 && i.Resolution.Length == 0).ToList();
+
+            foreach (var g in withFix.GroupBy(i => i.ResolvedInKb!))
+            {
+                var any = g.First();
+                var installed = _isInstalled(g.Key);
+                var kind = (any.OutOfBandFix ? "out-of-band " : "") + (g.All(i => i.PartialFix) ? "partial fix" : "fix");
+                var line = Text("", 12);
+                line.Inlines.Add(new Run($"{(g.All(i => i.PartialFix) ? "◐" : "✔")} {Plural(g.Count(), "issue", "issues")} addressed by ") { });
+                line.Inlines.Add(KbLink(g.Key));
+                line.Inlines.Add(new Run($" ({kind}). ") { });
+                line.Inlines.Add(new Run(installed ? "Installed on this PC." : "Not installed on this PC.")
+                    { FontWeight = FontWeights.SemiBold, Foreground = installed ? SeverityBrush(Severity.Green) : SeverityBrush(Severity.Orange) });
+                stack.Children.Add(line);
+            }
+            var wonly = withWorkaround.Where(i => i.ResolvedInKb is null).ToList();
+            if (wonly.Count > 0) stack.Children.Add(Text($"✔ {Plural(wonly.Count, "issue has", "issues have")} a workaround or mitigation from Microsoft (see below).", 12));
+            if (nothing.Count > 0) stack.Children.Add(Text($"✖ {Plural(nothing.Count, "issue has", "issues have")} no fix or workaround published yet.", 12, null, SeverityBrush(Severity.Orange)));
+        }
+
+        return new Border
+        {
+            Background = new SolidColorBrush(Color.FromArgb(28, 128, 128, 128)),
+            CornerRadius = new CornerRadius(6), Padding = new Thickness(10, 8, 10, 8), Margin = new Thickness(0, 12, 0, 0),
+            Child = stack,
+        };
+    }
+
+    private Inline KbLink(string kb)
+    {
+        var link = new Hyperlink(new Run(kb)) { ToolTip = UrlGuard.KbUrl(kb) };
+        link.Click += (_, _) => UrlGuard.OpenInBrowser(UrlGuard.KbUrl(kb), _log);
+        return link;
+    }
+
+    private static TextBlock Label(string text) => Text(text, 11, FontWeights.Bold, Brushes.Gray, new Thickness(0, 8, 0, 2));
+
+    private Expander IssueCard(KbIssue i)
+    {
+        var resolved = i.Status == IssueStatus.Resolved;
+        var title = string.IsNullOrWhiteSpace(i.Title) ? Shorten(i.Symptom, 90) : i.Title!;
+        var fg = resolved ? Brushes.Gray : null;
+
+        var header = new StackPanel { Orientation = Orientation.Horizontal };
+        var tag = resolved ? "RESOLVED" : i.PartialFix ? "PARTIAL FIX" : i.ResolvedInKb is not null ? "FIX AVAILABLE" : i.Workaround.Length + i.Resolution.Length > 0 ? "WORKAROUND" : "ACTIVE";
+        var tagBrush = resolved ? SeverityBrush(Severity.Grey) : i.ResolvedInKb is not null ? SeverityBrush(Severity.Green) : i.Workaround.Length + i.Resolution.Length > 0 ? SeverityBrush(Severity.Orange) : SeverityBrush(Severity.Red);
+        header.Children.Add(Chip(tag, tagBrush, Brushes.White));
+        var titleBlock = new TextBlock { Text = title, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap, MaxWidth = 380, VerticalAlignment = VerticalAlignment.Center };
+        if (fg is not null) titleBlock.Foreground = fg;      // null would override the theme colour with "no brush"
+        header.Children.Add(titleBlock);
+
+        var body = new StackPanel { Margin = new Thickness(4, 0, 0, 4) };
+        if (!string.IsNullOrWhiteSpace(i.AppliesTo)) body.Children.Add(Text("Applies to: " + i.AppliesTo, 11, null, Brushes.Gray));
+
+        body.Children.Add(Label("SYMPTOM"));
+        body.Children.Add(Highlighted(i.Symptom, fg));
+
+        if (i.ResolvedInKb is not null)
+        {
+            body.Children.Add(Label(i.PartialFix ? "PARTIAL FIX" : "FIX"));
+            var fix = Text("", 12);
+            fix.Inlines.Add(new Run((i.OutOfBandFix ? "Out-of-band update " : "Update ")));
+            fix.Inlines.Add(KbLink(i.ResolvedInKb));
+            var inst = _isInstalled(i.ResolvedInKb);
+            fix.Inlines.Add(new Run(inst ? "  ✔ installed on this PC" : "  ✖ not installed on this PC")
+                { FontWeight = FontWeights.SemiBold, Foreground = inst ? SeverityBrush(Severity.Green) : SeverityBrush(Severity.Orange) });
+            body.Children.Add(fix);
+        }
+        AddSection(body, "WORKAROUND", i.Workaround, fg);
+        AddSection(body, "RESOLUTION (PER MICROSOFT)", i.Resolution, fg);
+        AddSection(body, "NEXT STEPS", i.NextSteps, fg);
+        if (i.ResolvedInKb is null && i.Workaround.Length == 0 && i.Resolution.Length == 0 && !resolved)
+        {
+            body.Children.Add(Label("FIX / WORKAROUND"));
+            body.Children.Add(Text("None published yet. Use Refresh later; Microsoft updates these articles.", 12, null, Brushes.Gray));
+        }
+
+        return new Expander
+        {
+            Header = header, Content = body, IsExpanded = !resolved,
+            Margin = new Thickness(0, 0, 0, 8),
+        };
+    }
+
+    /// <summary>Long guidance (registry steps, policy walkthroughs) folds away so the window stays scannable.</summary>
+    private void AddSection(StackPanel body, string label, string text, Brush? fg)
+    {
+        if (text.Length == 0) return;
+        body.Children.Add(Label(label));
+        if (text.Length <= 450) { body.Children.Add(Highlighted(text, fg)); return; }
+        body.Children.Add(Highlighted(Shorten(text, 300), fg));
+        body.Children.Add(new Expander
+        {
+            Header = new TextBlock { Text = "Show full text", FontSize = 11 },
+            Content = Highlighted(text, fg), IsExpanded = false, Margin = new Thickness(0, 2, 0, 0),
+        });
+    }
+
+    private static string Shorten(string s, int max) => s.Length <= max ? s : s[..max].TrimEnd() + "…";
 
     private Border Chip(string text, Brush bg, Brush? fg)
     {

@@ -171,7 +171,7 @@ public sealed class AllUpdatesWindow : Window
         _grid.Columns.Add(Col("Category", nameof(GridRow.Category), 100));
         _grid.Columns.Add(Col("Installed", nameof(GridRow.Installed), 130));
         _grid.Columns.Add(Col("Result", nameof(GridRow.Result), 80));
-        _grid.Columns.Add(Col("Reviewed", nameof(GridRow.Reviewed), 80));
+        _grid.Columns.Add(Col("Reviewed", nameof(GridRow.Reviewed), 100));
         _grid.Columns.Add(Col("Notes", nameof(GridRow.Notes), 300));
     }
 

@@ -17,9 +17,9 @@ Spec: `guide.md`. This file is the live progress record.
 | P1 Core | Urgent + Important | In progress. P1.0-P1.10 done. P1.11 coded, awaiting CI verification. |
 | P2 Complete product | Important, schedule | Code complete except P2.10 and P2.12, which wait on SignPath (H1-H4). |
 | P3 Hardening | Urgent, low value | P3.1-P3.3 done. P3.4 needs real machines (use `tools/test-matrix.ps1`). |
-| P4 Polish | Not urgent, not important | Not started |
+| P4 Polish | Not urgent, not important | Done 2026-10-18. |
 
-Last updated: 2026-10-18 (P2 coded, P3.1-P3.3 done; 287 offline tests pass).
+Last updated: 2026-10-18 (P2 coded, P3.1-P3.3 and P4 done; 290 offline tests pass).
 
 ## Human actions (Dan) â€” start now, lead time about 1 week (unverified)
 
@@ -133,9 +133,12 @@ Last updated: 2026-10-18 (P2 coded, P3.1-P3.3 done; 287 offline tests pass).
 
 ## P4 â€” Polish (eliminate if time-poor)
 
-- [ ] **P4.1 README.** Screenshots, install, settings reference, keyword tuning, FAQ.
-- [ ] **P4.2 Menu tooltips.** First matched issue summary on hover.
-- [ ] **P4.3 Provenance docs.** `gh attestation verify` instructions in README.
+- [x] **P4.1 README.** Screenshots, install, settings reference, keyword tuning, FAQ.
+  **Done 2026-10-18:** full README written as if published: features, install, tray and detail-window guide, colour meanings, how risk is decided, full settings reference, keyword tuning, app updates and integrity, code signing policy, privacy, FAQ, build from source, contributing. Screenshots in `docs/images/` (light and dark, shown with `prefers-color-scheme`), rendered off-screen from the real windows with sample data from the saved KB fixtures. Regenerate with the render harness if the UI changes.
+- [x] **P4.2 Menu tooltips.** First matched issue summary on hover.
+  **Done 2026-10-18:** menu rows show the first matched issue or behaviour change as a tooltip (from P1.9); verified in code. Rows now also carry the reviewed tick and "changed since reviewed" tag.
+- [x] **P4.3 Provenance docs.** `gh attestation verify` instructions in README.
+  **Done 2026-10-18:** README section "Provenance and integrity" has the `gh attestation verify` command and the limits of the `.sha256` file.
 
 ---
 
@@ -184,6 +187,9 @@ Last updated: 2026-10-18 (P2 coded, P3.1-P3.3 done; 287 offline tests pass).
 | 2026-10-18 | Fetch chain order is now: support site, WebView2 (opt-in), release health. Enrichment from release health applies to any full article, from source A or WebView2. WebView2 reports HTTP status, and 404 maps to NotFound like source A. Package `Microsoft.Web.WebView2` 1.0.4258.31. | WebView2 gives the whole article; release health only gives known issues, so it should come last. |
 | 2026-10-18 | `--verify <outfile> <exe>` prints the Authenticode verdict via the same `WinTrustVerifier` the updater uses. | Lets the first signed release be checked on a clean machine before `RequireSignatureOnStable` is flipped (P2.12), and feeds the OS matrix. |
 | 2026-10-18 | Observed, not changed: `support.microsoft.com/help/1` redirects to a learn.microsoft.com landing page with status 200, so a bogus KB number parses as an Ok article with unknown structure (same in source A and WebView2). Real KB numbers are unaffected. | Noted for P4 if it ever matters. | Guide 11.2 asked for those restrictions in the file; the format does not support them. |
+| 2026-10-18 | Known issues now carry separate Symptom, Workaround, Resolution and Next steps text plus a structured fix: `ResolvedInKb`, `OutOfBandFix`, `PartialFix`. Parsed from the article labels and from "addressed / resolved in KB..." wording; release health rows fill `ResolvedInKb` too. The detail window leads with an At a glance panel and shows each issue as a collapsible card with a tag (ACTIVE, WORKAROUND, FIX AVAILABLE, PARTIAL FIX, RESOLVED), the fix as a link, and whether the fix KB is installed on this PC. | Dan's screenshot: Workaround and Resolution were one wall of text and nothing said whether a fix existed. Microsoft's own "Resolution" heading sometimes holds mitigation guidance, so it is labelled "per Microsoft" and only a named update counts as a Fix. |
+| 2026-10-18 | About is a real window, and every tray menu action runs after the popup has closed (`ApplicationIdle`). | A `MessageBox` opened inside the menu click was dismissed with the popup. Export save dialogs used the same path. |
+| 2026-10-18 | Uninstalling updates from PatchRadar is NOT built. Guide section 14 lists it as a non-goal. Design notes in the session reply: opt-in setting, elevation on demand, `wusa /uninstall` cannot remove most cumulative updates (needs `DISM /Remove-Package`), confirmation, and never offered for the newest servicing stack. | Waiting for Dan's decision. |
 
 ## Unverified items log
 
@@ -214,3 +220,4 @@ Last updated: 2026-10-18 (P2 coded, P3.1-P3.3 done; 287 offline tests pass).
 | 2026-10-17 | P1.2-P1.8 done and ticked. P1.9, P1.10, P1.11 coded, awaiting manual or CI check. 74 tests pass. | Dan: run the app and check the tray. Push to verify CI. Then P2. |
 | 2026-10-18 | P2.1-P2.9, P2.11 done and ticked; P2.10 and P2.12 coded and waiting on SignPath. 231 tests pass. | Dan: eyeball the tray menu and a real toast; push to verify CI (P1.11). Then P3. |
 | 2026-10-18 | P3.1-P3.3 done and ticked (287 tests). P3.4 helper script written; Windows 11 standard-user row filled. | Dan: run `tools/test-matrix.ps1` on the Servers and an elevated Windows 11 for P3.4; push to verify CI (P1.11); do H1-H4. |
+| 2026-10-18 | P4 done. Detail window redesigned (fix, workaround, resolution, installed check). About window fixed. 290 tests. | Dan: P1.11 CI result, H1-H4, P3.4 matrix, decide on uninstall-from-app. |

@@ -36,6 +36,16 @@ public sealed class KbIssue
     public string? AppliesTo { get; set; }
     public string Symptom { get; set; } = "";
     public string Workaround { get; set; } = "";
+    /// <summary>Microsoft's stated resolution (a fix, an update to install). Distinct from a workaround.</summary>
+    public string Resolution { get; set; } = "";
+    /// <summary>"Next steps" text some articles give once an issue is mitigated or fixed.</summary>
+    public string NextSteps { get; set; } = "";
+    /// <summary>KB that fixes this issue, when the text or release health names one.</summary>
+    public string? ResolvedInKb { get; set; }
+    /// <summary>The fix ships as an out-of-band update rather than the regular monthly release.</summary>
+    public bool OutOfBandFix { get; set; }
+    /// <summary>The named fix only partly resolves the issue.</summary>
+    public bool PartialFix { get; set; }
     public IssueStatus Status { get; set; } = IssueStatus.Active;
 }
 

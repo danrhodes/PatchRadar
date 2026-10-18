@@ -233,9 +233,9 @@ public sealed class ReleaseHealthSource : IKbSource, IKbEnricher
         Title = r.Title,
         AppliesTo = heading.Length > 0 ? heading : null,
         Symptom = r.Description,
-        Workaround = r.IsResolved
-            ? "Resolved" + (r.ResolvedInKb is null ? "." : $" in {r.ResolvedInKb}.")
-            : $"Status: {r.Status}.",
+        Workaround = r.IsResolved ? "" : $"Status: {r.Status}.",
+        Resolution = r.IsResolved ? "Resolved" + (r.ResolvedInKb is null ? "." : $" in {r.ResolvedInKb}.") : "",
+        ResolvedInKb = r.IsResolved ? r.ResolvedInKb : null,
         Status = r.IsResolved ? IssueStatus.Resolved : IssueStatus.Active,
     };
 

@@ -188,7 +188,7 @@ public class ReleaseHealthTests
         Assert.Equal(KbStatus.Ok, d.Status);
         Assert.True(d.KnownIssues.Count >= 2);
         Assert.Contains(d.KnownIssues, i => i.Title!.StartsWith("Remote Desktop") && i.Status == IssueStatus.Active);
-        Assert.Contains(d.KnownIssues, i => i.Title!.StartsWith("Applications which require AC-3") && i.Status == IssueStatus.Resolved && i.Workaround.Contains("KB5127648"));
+        Assert.Contains(d.KnownIssues, i => i.Title!.StartsWith("Applications which require AC-3") && i.Status == IssueStatus.Resolved && i.ResolvedInKb == "KB5127648" && i.Resolution.Contains("KB5127648"));
         Assert.NotNull(d.Notice);
         Assert.NotEmpty(d.ContentHash);
     }

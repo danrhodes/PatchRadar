@@ -44,7 +44,7 @@ public sealed class SeverityEngine
         var redIssue = false;
         foreach (var issue in active)
         {
-            var hits = _critical.Match($"{issue.Title} {issue.Symptom} {issue.Workaround}");
+            var hits = _critical.Match($"{issue.Title} {issue.Symptom} {issue.Workaround} {issue.Resolution}");
             if (hits.Count > 0) redIssue = true;
             AddAll(hits);
         }

@@ -70,6 +70,9 @@ public static class SummaryFormatter
             {
                 sb.AppendLine("- " + (string.IsNullOrEmpty(i.Title) ? i.Symptom : i.Title + ": " + i.Symptom));
                 if (i.Workaround.Length > 0) sb.AppendLine("  Workaround: " + i.Workaround);
+                if (i.Resolution.Length > 0) sb.AppendLine("  Resolution: " + i.Resolution);
+                if (i.ResolvedInKb is not null) sb.AppendLine($"  {(i.PartialFix ? "Partial fix" : "Fix")}: {i.ResolvedInKb}{(i.OutOfBandFix ? " (out-of-band)" : "")}");
+                else if (i.Workaround.Length == 0 && i.Resolution.Length == 0) sb.AppendLine("  No fix or workaround published yet");
             }
         }
         if (row.Kb is null || row.Kb.Status != KbStatus.Ok)

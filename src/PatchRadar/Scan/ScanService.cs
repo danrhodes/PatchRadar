@@ -37,6 +37,13 @@ public sealed class ScanService
     private readonly ILog _log;
     private readonly SemaphoreSlim _scanLock = new(1, 1);
     private readonly ReviewStore? _reviews;
+    private volatile HashSet<string> _installed = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>True when this KB is installed on this machine (from the last history read).</summary>
+    public bool IsInstalled(string kb) => _installed.Contains(kb);
+
+    private void Remember(IEnumerable<InstalledUpdate> all) =>
+        _installed = new HashSet<string>(all.Where(u => u.State == UpdateState.Installed).Select(u => u.Kb), StringComparer.OrdinalIgnoreCase);
 
     public ScanService(IUpdateHistoryProvider history, KbFetcher fetcher, Func<AppSettings> settings, ILog? log = null, ReviewStore? reviews = null)
     {
@@ -54,6 +61,7 @@ public sealed class ScanService
     {
         var s = _settings();
         var all = await _history.GetAsync(ct).ConfigureAwait(false);
+        Remember(all);
         var filtered = UpdateMerger.Filter(all, s.Updates, DateTimeOffset.UtcNow, allTime);
         var engine = new SeverityEngine(s.ToSeverityOptions());
         var snap = Snapshot();
@@ -100,6 +108,7 @@ public sealed class ScanService
         {
             var s = _settings();
             var all = await _history.GetAsync(ct).ConfigureAwait(false);
+            Remember(all);
             var updates = UpdateMerger.Filter(all, s.Updates, DateTimeOffset.UtcNow);
             _log.Info($"Scan: {all.Count} updates in history, {updates.Count} after filters (force={force})");
 

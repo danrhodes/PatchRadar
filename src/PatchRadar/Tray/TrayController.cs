@@ -214,7 +214,7 @@ public sealed class TrayController : IDisposable
             var item = new MenuItem { Header = panel };
             if (!string.IsNullOrWhiteSpace(row.Result.Summary)) item.ToolTip = row.Result.Summary;
             var captured = row;
-            item.Click += (_, _) => ShowDetail(captured);
+            item.Click += (_, _) => Later(() => ShowDetail(captured));
             menu.Items.Add(item);
         }
 
@@ -226,7 +226,7 @@ public sealed class TrayController : IDisposable
         void AddExport(string text, Action click)
         {
             var mi = new MenuItem { Header = text };
-            mi.Click += (_, _) => click();
+            mi.Click += (_, _) => Later(click);
             export.Items.Add(mi);
         }
         AddExport("CSV…", () => ExportActions.SaveAs(ExportFormat.Csv, _last.Rows, null, _log));
@@ -271,10 +271,17 @@ public sealed class TrayController : IDisposable
     private string NextText() =>
         _scheduler.NextScan is { } n ? $" · next {n:HH:mm}" : "";
 
+    /// <summary>
+    /// Menu clicks run after the popup has finished closing. Opening a window or dialog inside the click
+    /// itself can lose focus and be dismissed together with the menu.
+    /// </summary>
+    private static void Later(Action a) =>
+        Application.Current?.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.ApplicationIdle, a);
+
     private static void AddItem(ContextMenu m, string header, Action click, bool enabled = true)
     {
         var item = new MenuItem { Header = header, IsEnabled = enabled };
-        item.Click += (_, _) => click();
+        item.Click += (_, _) => Later(click);
         m.Items.Add(item);
     }
 
@@ -288,11 +295,12 @@ public sealed class TrayController : IDisposable
             existing.Activate();
             return;
         }
-        var win = new DetailWindow(row, Settings.Appearance.Colors, RefreshRowAsync, SetReviewed, _log);
+        var win = new DetailWindow(row, Settings.Appearance.Colors, RefreshRowAsync, SetReviewed, _scan.IsInstalled, _log);
         _details[row.Update.Kb] = win;
         win.Closed += (_, _) => _details.Remove(row.Update.Kb);
         win.Show();
         win.Activate();
+        win.Topmost = true; win.Topmost = false;
     }
 
     private void ShowAllUpdates()
@@ -347,10 +355,15 @@ public sealed class TrayController : IDisposable
         catch (Exception ex) { _log.Error("Open log folder failed", ex); }
     }
 
-    private static void ShowAbout()
+    private AboutWindow? _about;
+
+    private void ShowAbout()
     {
-        MessageBox.Show($"PatchRadar {AppVersion.Running()} ({AppVersion.Flavour()})\n\nFlags risky Windows updates from Microsoft KB articles.\nhttps://github.com/danrhodes/PatchRadar\nMIT licence.",
-            "About PatchRadar", MessageBoxButton.OK, MessageBoxImage.Information);
+        if (_about is { IsLoaded: true }) { _about.Activate(); return; }
+        _about = new AboutWindow(_log);
+        _about.Closed += (_, _) => _about = null;
+        _about.Show();
+        _about.Activate();
     }
 
     public void Dispose()

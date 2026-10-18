@@ -199,7 +199,8 @@ public static class KbParser
         var headers = table.Descendants("th").Select(th => Clean(Text(th))).ToList();
         int sym = headers.FindIndex(h => h.StartsWith("symptom", StringComparison.OrdinalIgnoreCase));
         int wrk = headers.FindIndex(h => h.StartsWith("workaround", StringComparison.OrdinalIgnoreCase)
-                                      || h.StartsWith("resolution", StringComparison.OrdinalIgnoreCase));
+                                      || h.StartsWith("mitigation", StringComparison.OrdinalIgnoreCase));
+        int res = headers.FindIndex(h => h.StartsWith("resolution", StringComparison.OrdinalIgnoreCase));
         int app = headers.FindIndex(h => h.StartsWith("applies", StringComparison.OrdinalIgnoreCase));
         if (sym < 0) yield break;
 
@@ -211,6 +212,7 @@ public static class KbParser
             {
                 Symptom = Clean(Text(cells[sym])),
                 Workaround = wrk >= 0 && cells.Count > wrk ? Clean(Text(cells[wrk])) : "",
+                Resolution = res >= 0 && cells.Count > res ? Clean(Text(cells[res])) : "",
                 AppliesTo = app >= 0 && cells.Count > app ? Clean(Text(cells[app])) : null,
             };
             if (issue.Symptom.Length == 0) continue;
@@ -229,6 +231,8 @@ public static class KbParser
         {
             issue.Symptom = Clean(Text(symSec));
             issue.Workaround = wrkSec is null ? "" : Clean(Text(wrkSec));
+            var resSec = det.Descendants("section").FirstOrDefault(s => s.GetAttributeValue("data-tab", "") is "resolution" or "next-steps");
+            if (resSec is not null) issue.Resolution = Clean(Text(resSec));
             return Finish(issue);
         }
 
@@ -237,6 +241,8 @@ public static class KbParser
         string? mode = "symptom";
         var sym = new StringBuilder();
         var wrk = new StringBuilder();
+        var resb = new StringBuilder();
+        var nxt = new StringBuilder();
         var sawLabel = false;
         foreach (var child in det.ChildNodes.Where(c => c.NodeType == HtmlNodeType.Element && c.Name != "summary"))
         {
@@ -244,23 +250,42 @@ public static class KbParser
             {
                 var label = Clean(Text(child)).TrimEnd(':').ToLowerInvariant();
                 if (label.StartsWith("symptom")) { mode = "symptom"; sawLabel = true; continue; }
-                if (label.StartsWith("resolution") || label.StartsWith("workaround") || label.StartsWith("mitigation"))
-                { mode = "workaround"; sawLabel = true; continue; }
+                if (label.StartsWith("workaround") || label.StartsWith("mitigation")) { mode = "workaround"; sawLabel = true; continue; }
+                if (label.StartsWith("resolution")) { mode = "resolution"; sawLabel = true; continue; }
+                if (label.StartsWith("next step")) { mode = "next"; sawLabel = true; continue; }
             }
             var t = Clean(Text(child));
             if (t.Length == 0) continue;
-            (mode == "workaround" ? wrk : sym).Append(t).Append('\n');
+            (mode switch { "workaround" => wrk, "resolution" => resb, "next" => nxt, _ => sym }).Append(t).Append('\n');
         }
         _ = sb;
         if (!sawLabel && sym.Length == 0 && wrk.Length == 0) sym.Append(Clean(Text(det)));
         issue.Symptom = sym.ToString().Trim();
         issue.Workaround = wrk.ToString().Trim();
+        issue.Resolution = resb.ToString().Trim();
+        issue.NextSteps = nxt.ToString().Trim();
         return Finish(issue);
+    }
+
+    // "resolved in KB5012345", "addressed in KB...", "fixed by installing KB...", "out-of-band update KB..."
+    private static readonly Regex FixKbRx = new(
+        @"(?:resolved|addressed|fixed|corrected|mitigated)\s+(?:in|by|with)(?:\s+(?:installing|the|update|updates|this|release))*[^.]{0,80}?(?<kb>KB\d{6,8})|(?:install|installing)\s+(?:the\s+)?(?:out-of-band|OOB)[^.]{0,60}?(?<kb2>KB\d{6,8})",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex OobRx = new(@"out[- ]of[- ]band|\bOOB\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static void ExtractFix(KbIssue issue, string text)
+    {
+        var m = FixKbRx.Match(text);
+        if (m.Success) issue.ResolvedInKb = (m.Groups["kb"].Success ? m.Groups["kb"].Value : m.Groups["kb2"].Value).ToUpperInvariant();
+        // Only a fix, not the mere mention of OOB in a symptom, counts.
+        issue.PartialFix = issue.ResolvedInKb is not null && Regex.IsMatch($"{issue.Resolution} {issue.NextSteps} {issue.Workaround}", @"partial", RegexOptions.IgnoreCase);
+        issue.OutOfBandFix = issue.ResolvedInKb is not null && OobRx.IsMatch($"{issue.Resolution} {issue.NextSteps} {issue.Workaround}");
     }
 
     private static KbIssue Finish(KbIssue issue)
     {
-        var all = $"{issue.Title} {issue.Symptom} {issue.Workaround}";
+        var all = $"{issue.Title} {issue.Symptom} {issue.Workaround} {issue.Resolution} {issue.NextSteps}";
+        ExtractFix(issue, $"{issue.Resolution} {issue.NextSteps} {issue.Symptom} {issue.Workaround}");
         issue.Status = ResolvedRx.IsMatch(all) && !PartialRx.IsMatch(all) ? IssueStatus.Resolved : IssueStatus.Active;
         return issue;
     }
@@ -300,7 +325,7 @@ public static class KbParser
     {
         var sb = new StringBuilder();
         foreach (var i in d.Improvements) sb.Append(i.Text).Append('\u001f');
-        foreach (var k in d.KnownIssues) sb.Append(k.Title).Append('|').Append(k.Symptom).Append('|').Append(k.Workaround).Append('|').Append(k.Status).Append('\u001f');
+        foreach (var k in d.KnownIssues) sb.Append(k.Title).Append('|').Append(k.Symptom).Append('|').Append(k.Workaround).Append('|').Append(k.Resolution).Append('|').Append(k.NextSteps).Append('|').Append(k.Status).Append('\u001f');
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sb.ToString())));
     }
 }
