@@ -15,11 +15,11 @@ Spec: `guide.md`. This file is the live progress record.
 | Phase | Priority | State |
 |---|---|---|
 | P1 Core | Urgent + Important | In progress. P1.0-P1.10 done. P1.11 coded, awaiting CI verification. |
-| P2 Complete product | Important, schedule | Not started |
+| P2 Complete product | Important, schedule | Code complete except P2.10 and P2.12, which wait on SignPath (H1-H4). |
 | P3 Hardening | Urgent, low value | Not started |
 | P4 Polish | Not urgent, not important | Not started |
 
-Last updated: 2026-10-17 (P1 code written; 74 offline tests pass).
+Last updated: 2026-10-18 (P2 coded; 231 offline tests pass).
 
 ## Human actions (Dan) â€” start now, lead time about 1 week (unverified)
 
@@ -67,30 +67,54 @@ Last updated: 2026-10-17 (P1 code written; 74 offline tests pass).
 
 ## P2 â€” Complete product (schedule)
 
-- [ ] **P2.1 Settings window.** All sections from guide section 7.5. Reset to defaults. Open settings file.
+- [x] **P2.1 Settings window.** All sections from guide section 7.5. Reset to defaults. Open settings file.
   Accept: every key in `settings.json` editable. Changes apply without restart.
-- [ ] **P2.2 Dark mode.** System/Light/Dark. Live switch on OS theme change.
+  **Done 2026-10-18:** all eight sections, every key of `settings.json` editable, Save validates and applies live (theme, scan timers, menu size, run at login, log level, update schedule, proxy/timeout/User-Agent). `network.maxConcurrent` applies after restart (stated in the UI). Layout checked from off-screen renders.
+
+- [x] **P2.2 Dark mode.** System/Light/Dark. Live switch on OS theme change.
   Accept: menu, windows and grid correct in both themes.
-- [ ] **P2.3 All Updates window.** Filters, symptom search over cached text, double-click to detail.
+  **Done 2026-10-18:** built on the WPF Fluent theme (`ThemeMode` System/Light/Dark, follows the OS live and via `UserPreferenceChanged`). Settings, All Updates (grid) and Detail windows and a ContextMenu rendered in both themes and checked. Dan: eyeball the real tray menu once.
+
+- [x] **P2.3 All Updates window.** Filters, symptom search over cached text, double-click to detail.
   Accept: searching `wifi` or `NTLM` returns KB5127648.
-- [ ] **P2.4 Export.** CSV, JSON, Markdown. Respects filters. Also reachable from tray menu.
+  **Done 2026-10-18:** `wifi`, `Wi-Fi`, `NTLM`, `mschapv2`, `BlockNtlmv1SSO` all return KB5127648 (tests). The grid has no Reviewed column yet: it arrives with P3.1.
+
+- [x] **P2.4 Export.** CSV, JSON, Markdown. Respects filters. Also reachable from tray menu.
   Accept: Markdown output pastes cleanly into a ticket.
-- [ ] **P2.5 Final icon art.** Radar concept per guide section 10.
+  **Done 2026-10-18:** CSV (RFC 4180, formula-safe), JSON, Markdown table (pipes escaped, KB links). Save As and Copy as Markdown in the All Updates window (respects filters) and in the tray Export submenu (all scanned updates).
+
+- [x] **P2.5 Final icon art.** Radar concept per guide section 10.
   Accept: readable at 16, 24, 32 px on light and dark taskbars.
-- [ ] **P2.6 Release health fallback (source B).** Enrich and fall back by originating KB.
+  **Done 2026-10-18:** sweep wedge, crosshair, blip glow and a light rim so the tile reads on dark taskbars; the 16 px variant stays simple. See `assets/preview.png`.
+
+- [x] **P2.6 Release health fallback (source B).** Enrich and fall back by originating KB.
   Accept: with source A blocked, a known issue still resolves for a test KB.
-- [ ] **P2.7 Toast on new red and tray state.** Toast fires once per KB per content hash.
+  **Done 2026-10-18:** `ReleaseHealthSource` is both fallback and enrichment. Test: source A returns 403, KB5124010 still resolves its Remote Desktop issue from release health and goes Red. Live `--diag` verified on this machine (26H2 page; KB5124010 gave 2 issues).
+
+- [x] **P2.7 Toast on new red and tray state.** Toast fires once per KB per content hash.
   Accept: no repeat toasts after restart.
-- [ ] **P2.8 Run at login, logging.** HKCU Run toggle. Rolling logs, 14 days.
+  **Done 2026-10-18:** `ToastTracker` persists KB + content hash in `state.json`; tests cover restart, changed hash, old updates recorded silently, corrupt file. The balloon itself is for Dan to eyeball on the next real red.
+
+- [x] **P2.8 Run at login, logging.** HKCU Run toggle. Rolling logs, 14 days.
   Accept: toggle adds and removes the registry value. Log folder opens from menu.
-- [ ] **P2.9 App auto-update.** Per guide section 11.1: GitHub Releases check, SemVer compare (pre-release N numeric), full/slim asset pick, SHA-256 verify, URL allowlist, rename-and-replace apply, `--post-update` restart, health check, rollback. Modes Off/Notify/Auto. Stable/PreRelease channels. Settings section and tray menu items.
+  **Done 2026-10-18:** `Autostart` writes and removes `HKCU\...\Run\PatchRadar` (quoted path, repairs a stale path); real HKCU round-trip tested and seen on a real start. Rolling daily logs (keep 14) were done in P1; Open log folder is in the menu.
+
+- [x] **P2.9 App auto-update.** Per guide section 11.1: GitHub Releases check, SemVer compare (pre-release N numeric), full/slim asset pick, SHA-256 verify, URL allowlist, rename-and-replace apply, `--post-update` restart, health check, rollback. Modes Off/Notify/Auto. Stable/PreRelease channels. Settings section and tray menu items.
   Accept: with a fake release newer than running, Auto mode downloads, verifies, swaps and restarts into the new exe. Hash mismatch aborts. Stable ignores pre-releases. Two failed starts roll back to `.old`. Unit tests pass with no network.
+  **Done 2026-10-18:** all in `src/PatchRadar/AppUpdate/`, 100+ offline tests with fakes for HTTP, signature check, launcher and injectable file operations. Windows 11 build 26300 allows renaming the running exe (checked for real). Not yet exercised end to end against a real GitHub release (none exists until CI has run).
+
 - [ ] **P2.10 Signing in CI (needs H3, H4).** Guide 11.2: zip, upload-artifact, SignPath action, unzip, `Get-AuthenticodeSignature` gate, checksum after signing, attest signed exes. Full releases only. Add `.signpath/policies/patchradar/release-signing.yml` and `docs/signpath/artifact-configuration.xml`.
   Accept: a manual full release produces signed exes. The job fails if the signature is not Valid or the signer is not SignPath Foundation. Pre-releases still publish unsigned.
-- [ ] **P2.11 README code signing policy.** Attribution line, roles, verify command, privacy statement.
+  **Status: coded, NOT ticked (needs H3 and H4).** Signing steps are gated on `SIGNPATH_API_TOKEN` + `SIGNPATH_ORGANIZATION_ID`: without them a full release ships unsigned and its notes say so. Action inputs checked against `signpath/github-action-submit-signing-request@v2` `action.yml`. Files added: `.signpath/policies/patchradar/release-signing.yml`, `docs/signpath/artifact-configuration.xml`.
+
+- [x] **P2.11 README code signing policy.** Attribution line, roles, verify command, privacy statement.
   Accept: README section matches guide 11.2 wording. Needed for H1 (can be done before approval).
+  **Done 2026-10-18:** README has Code signing policy (attribution, roles, verify command, privacy), install location and integrity limits.
+
 - [ ] **P2.12 Updater signature check.** `IAuthenticodeVerifier` via `WinVerifyTrust` plus signer subject check. Constant `RequireSignatureOnStable` ships `false`. Flip to `true` after the first signed release verifies on a clean machine.
   Accept: tests cover valid, unsigned, wrong signer, tampered. PreRelease channel skips the check. Flip commit logged in Decisions.
+  **Status: coded, NOT ticked.** `IAuthenticodeVerifier`, `WinTrustVerifier` (WinVerifyTrust + signer subject) and the Stable-channel gate exist and are tested for valid, unsigned, wrong signer and tampered (including real files). `RequireSignatureOnStable` ships `false`. Tick after the flip commit.
+
 
 ## P3 â€” Hardening (urgent, low value; delegate or batch)
 
@@ -139,6 +163,17 @@ Last updated: 2026-10-17 (P1 code written; 74 offline tests pass).
 | 2026-10-17 | Full (self-contained) exe built with `EnableCompressionInSingleFile=true`. | Uncompressed it was 134.5 MB; compressed 62.5 MB. Slightly slower first start. Trimming unsupported for WPF. Helps the SignPath size risk. |
 | 2026-10-17 | `--diag <file> [KB...]` command-line mode added. Headless: times update collection, live-fetches KBs. | Gives acceptance evidence without a UI. |
 | 2026-10-17 | Keep `net10.0-windows`; test project also targets `net10.0-windows` so it can reference the WPF project | Server 2016 support not disproven. |
+| 2026-10-18 | P2 started while P1.11 was still unverified (CI never run). | Dan asked to continue; P1.11 stays open. The first push to `main` is the real test of the workflow. |
+| 2026-10-18 | Theme via the WPF Fluent theme (`Application.ThemeMode`) rather than hand-written resource dictionaries. | One switch styles every control, the menu, the DataGrid and the window chrome, and follows the OS live. Needs `WPF0001` suppressed (experimental API). |
+| 2026-10-18 | Settings window edits a clone of the live settings; keyword boxes show the effective list and store an empty list when it equals the defaults. | Keeps unknown keys, and future default changes still apply. |
+| 2026-10-18 | Release health pages are chosen from the local OS (registry build + DisplayVersion) and issues matched by originating KB. Status page slugs verified live (Windows 11 21H2 to 26H2, Server 2016 to 2025). | The installed update is on this machine, so only its own OS page matters. A Resolved row stays Resolved even if the resolving KB is not installed; the text names the resolving KB. |
+| 2026-10-18 | When every source fails, `LastError` lists each source's error (for example `support.microsoft.com: HTTP 403; learn.microsoft.com (release health): ...`); retry timing follows the first source. | A 404 on source A still means a 7 day retry even when B has nothing either. |
+| 2026-10-18 | Toasts: one per KB per content hash, persisted in `state.json`. Updates older than `recentWindowDays` are recorded silently; several new reds are grouped into one toast. Recorded even when toasts are off. | A first run must not toast the whole history, and switching toasts on later must not replay old reds. |
+| 2026-10-18 | Updater health rule read literally: a start that finds `attempts >= 2` and `healthy: false` rolls back; every earlier start increments. So the third start after an update performs the rollback. The failing exe is kept as `.failed`, not deleted. | Guide 11.1. One crash does not trigger a rollback; two do. |
+| 2026-10-18 | Off mode: no automatic checks, but the tray's manual Check for app update still works and behaves as Notify. Development builds (version `1.0.0`, no `-p:Version`) skip automatic checks and never auto-apply. | An explicit click is a request; a dev build must not overwrite `bin\Debug`. |
+| 2026-10-18 | Signature check uses WinVerifyTrust with revocation lookups off, then requires `O=SignPath Foundation` in the signer subject. | Servers that cannot reach CRL endpoints would otherwise reject good files; the chain, hash and signer subject checks remain. |
+| 2026-10-18 | CI uploads the two exes directly with `upload-artifact` (the GitHub artifact is already a ZIP) instead of pre-zipping them as the guide worded it; artifact configuration root is `zip-file`. Signing is skipped, with a warning and a note in the release body, when the SignPath secret or variable is missing. | A zip inside the artifact zip would need nested configuration. The gate keeps full releases possible before H3 and H4. |
+| 2026-10-18 | `.signpath/policies/patchradar/release-signing.yml` uses SignPath's documented pipeline-policy keys (`github-build-policies`: `disallow_reruns`, `runners.require_github_hosted`). The docs show no repo, workflow or branch keys, so that restriction is set in SignPath (trusted build system link), not in the file. | Guide 11.2 asked for those restrictions in the file; the format does not support them. |
 
 ## Unverified items log
 
@@ -148,14 +183,14 @@ Last updated: 2026-10-17 (P1 code written; 74 offline tests pass).
 | `QueryHistory` as standard user | Works. `--diag` as non-elevated user: WUA 343 entries in 209 ms, QFE 6 in 1.4 s, merged list 944 ms total. Win11 26300. | 2026-10-17 |
 | `support.microsoft.com` bot blocking from app | Not blocked. Live fetch of KB5127648 and KB5044281 succeeded with the browser User-Agent, 0.7 to 1.8 s each. One machine, one day. Keep watching. | 2026-10-17 |
 | KB known-issues layout (table vs prose) | All three layouts occur. See Decisions. | 2026-10-17 |
-| Release health page layout | | |
+| Release health page layout | Known issues table: columns Summary / Originating update / Status / Last updated; title in a bold link, resolving KB in the Status cell. Parsed by header text. All 8 status-page URLs return 200. One page live-checked on 26H2. | 2026-10-18 |
 | Microsoft terms on automated access | | |
-| Rename-running-exe update works on all matrix OSes | | |
+| Rename-running-exe update works on all matrix OSes | Windows 11 26300: renaming and replacing a running exe works; deleting it is blocked (as designed). Other matrix OSes still to do in P3.4. | 2026-10-18 |
 | Defender / ThreatLocker reaction to self-replacing exe | | |
 | SignPath Foundation approves a new repo (reputation check) | | |
 | SignPath approval mode and typical wait | | |
 | SignPath artifact size limit vs ~70 MB self-contained exe | | |
-| SignPath action current major version and input names | | |
+| SignPath action current major version and input names | `signpath/github-action-submit-signing-request` v2: inputs `api-token`, `organization-id`, `project-slug`, `signing-policy-slug`, `artifact-configuration-slug`, `github-artifact-id`, `wait-for-completion(-timeout-in-seconds)`, `output-artifact-directory` confirmed in its action.yml. | 2026-10-18 |
 | `WinVerifyTrust` on Server 2016 with SHA-256 timestamped signature | | |
 
 ## Session log
@@ -167,3 +202,4 @@ Last updated: 2026-10-17 (P1 code written; 74 offline tests pass).
 | 2026-10-17 | SignPath signing added (guide 11.2, tracker H1â€“H4, P2.10â€“P2.12) | P1.0, Dan does H1 |
 | 2026-10-17 | P1.0 scaffold, P1.1 TFM check | P1.2 |
 | 2026-10-17 | P1.2-P1.8 done and ticked. P1.9, P1.10, P1.11 coded, awaiting manual or CI check. 74 tests pass. | Dan: run the app and check the tray. Push to verify CI. Then P2. |
+| 2026-10-18 | P2.1-P2.9, P2.11 done and ticked; P2.10 and P2.12 coded and waiting on SignPath. 231 tests pass. | Dan: eyeball the tray menu and a real toast; push to verify CI (P1.11). Then P3. |

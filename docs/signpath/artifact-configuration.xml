@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Reference copy of the SignPath artifact configuration for project "patchradar".
+  The live copy is created in the SignPath web app (guide.md section 11.2, step 3); keep them in sync.
+
+  The workflow uploads both exes with actions/upload-artifact, so the GitHub artifact is a ZIP whose
+  root contains:
+    PatchRadar-<tag>-win-x64.exe         (self-contained)
+    PatchRadar-<tag>-win-x64-slim.exe    (framework-dependent)
+  Both get an Authenticode signature. The names include the version tag, hence the wildcards.
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <zip-file>
+    <pe-file-set>
+      <include path="PatchRadar-*-win-x64.exe"/>
+      <include path="PatchRadar-*-win-x64-slim.exe"/>
+      <for-each>
+        <authenticode-sign/>
+      </for-each>
+    </pe-file-set>
+  </zip-file>
+</artifact-configuration>

@@ -2,7 +2,9 @@ name: Build and Release
 
 # Push to main  -> pre-release (unsigned; the in-app updater ignores pre-releases on the Stable channel).
 # Manual run    -> full release: pick patch / minor / major, the workflow tags the next version.
-# Pattern copied from danrhodes/Ticktower. Code signing (SignPath, full releases only) is added in P2.10.
+# Pattern copied from danrhodes/Ticktower.
+# Full releases are Authenticode-signed through SignPath Foundation once SIGNPATH_API_TOKEN (secret) and
+# SIGNPATH_ORGANIZATION_ID (variable) exist. Until then a full release ships unsigned and says so in its notes.
 on:
   push:
     branches: [main]
@@ -78,6 +80,20 @@ jobs:
           "last=$last" >> $env:GITHUB_OUTPUT
           Write-Host "Previous full release: '$last'  ->  new: v$next"
 
+      # Full releases only. Secrets cannot be read in an `if:`, so test for them here.
+      - name: Check signing is configured
+        id: sign
+        env:
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+          SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+        run: |
+          $full = '${{ steps.v.outputs.full }}' -eq 'true'
+          $ready = [bool]$env:SIGNPATH_API_TOKEN -and [bool]$env:SIGNPATH_ORGANIZATION_ID
+          if ($full -and -not $ready) {
+            Write-Warning 'SignPath is not configured (SIGNPATH_API_TOKEN / SIGNPATH_ORGANIZATION_ID). This full release will be UNSIGNED.'
+          }
+          "enabled=$($full -and $ready)".ToLower() >> $env:GITHUB_OUTPUT
+
       - name: Generate changelog
         run: |
           # Full releases list everything since the previous full release; pre-releases since the previous tag.
@@ -87,6 +103,7 @@ jobs:
           $commits = git log --pretty=format:"- %s (%h)" $range
           $notes = @()
           if ('${{ steps.v.outputs.full }}' -ne 'true') { $notes += "**Unsigned pre-release.**"; $notes += "" }
+          elseif ('${{ steps.sign.outputs.enabled }}' -ne 'true') { $notes += "**Unsigned release:** code signing was not configured for this run."; $notes += "" }
           $notes += "### Changes"
           if ($commits) { $notes += $commits } else { $notes += "- No changes" }
           $notes | Set-Content changelog.txt -Encoding utf8
@@ -106,6 +123,54 @@ jobs:
           New-Item -ItemType Directory -Force publish/out | Out-Null
           Copy-Item publish/full/PatchRadar.exe "publish/out/PatchRadar-$tag-win-x64.exe"
           Copy-Item publish/slim/PatchRadar.exe "publish/out/PatchRadar-$tag-win-x64-slim.exe"
+
+      # ---- Code signing (full releases only; guide.md section 11.2) ----------------------------------
+      # Order matters: sign first, then checksum, then attest. Signing changes the file hash.
+      # The GitHub artifact is itself a ZIP, so the two exes are uploaded directly (artifact configuration
+      # root = zip-file; reference copy in docs/signpath/artifact-configuration.xml).
+      - name: Upload unsigned exes
+        id: upload-unsigned
+        if: steps.sign.outputs.enabled == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: PatchRadar-unsigned
+          path: publish/out/*.exe
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Sign with SignPath
+        if: steps.sign.outputs.enabled == 'true'
+        uses: signpath/github-action-submit-signing-request@v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: patchradar
+          signing-policy-slug: release-signing
+          artifact-configuration-slug: default
+          github-artifact-id: ${{ steps.upload-unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: signed
+
+      - name: Replace unsigned exes with signed exes
+        if: steps.sign.outputs.enabled == 'true'
+        run: |
+          $signed = Get-ChildItem signed -Recurse -Filter *.exe
+          if (-not $signed) { throw 'SignPath returned no exe files.' }
+          foreach ($f in $signed) { Copy-Item $f.FullName (Join-Path publish/out $f.Name) -Force }
+
+      # The job fails unless every exe carries a valid signature from SignPath Foundation.
+      - name: Verify signatures
+        if: steps.sign.outputs.enabled == 'true'
+        run: |
+          $bad = @()
+          Get-ChildItem publish/out -Filter *.exe | ForEach-Object {
+            $sig = Get-AuthenticodeSignature $_.FullName
+            $subject = if ($sig.SignerCertificate) { $sig.SignerCertificate.Subject } else { '' }
+            Write-Host "$($_.Name): $($sig.Status)  $subject"
+            if ($sig.Status -ne 'Valid' -or $subject -notlike '*SignPath Foundation*') { $bad += $_.Name }
+          }
+          if ($bad) { throw "Signature check failed for: $($bad -join ', ')" }
 
       # Generated after any signing step: signing changes the hash. Format: "<hash>  <filename>".
       - name: Checksums

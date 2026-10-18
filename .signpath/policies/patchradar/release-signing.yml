@@ -1,0 +1,17 @@
+# SignPath pipeline policy for the "release-signing" signing policy of project "patchradar".
+# Format: https://docs.signpath.io/pipeline-policies and https://docs.signpath.io/trusted-build-systems/github
+#
+# Only full releases are signed (manual run of .github/workflows/release.yml on main).
+# Pre-releases from pushes to main are unsigned and never reach SignPath.
+#
+# Which repository, workflow file and branch may submit is NOT expressed in this file: SignPath derives it
+# from the trusted build system link (GitHub, danrhodes/PatchRadar) and records it as origin metadata,
+# so those restrictions are set in the SignPath web app (see guide.md section 11.2, step 3).
+
+github-build-policies:
+  version: '1.0'
+  # An old, temporarily failed build must not be re-run and signed as if it contained recent changes.
+  disallow_reruns: true
+  runners:
+    # windows-latest is GitHub-hosted. A self-hosted runner would make the build origin unverifiable.
+    require_github_hosted: true
