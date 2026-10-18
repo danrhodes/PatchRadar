@@ -1,4 +1,4 @@
-<#
+﻿<#
   Generates assets/app.ico and assets/tray-{green,orange,red,grey}.ico with System.Drawing.
   Radar concept: rounded dark-navy square, green rings, one sweep line, blips.
   At small sizes (<= 24 px) rings are dropped and only the sweep plus one blip remain.
@@ -47,6 +47,19 @@ function New-RadarBitmap([int]$size, [string]$state) {
         }
     }
 
+    # crosshair and a fading sweep wedge trailing the line (large sizes only)
+    if (-not $small) {
+        $cross = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(70, $ring)), ([Math]::Max(1.0, $s / 96))
+        $g.DrawLine($cross, $cx, $s * 0.08, $cx, $s * 0.92)
+        $g.DrawLine($cross, $s * 0.08, $cy, $s * 0.92, $cy)
+        $wr = $s * 0.42
+        $deg = [Math]::Atan2(-0.62, 0.78) * 180 / [Math]::PI      # sweep angle, GDI (clockwise from +x)
+        foreach ($span in 60, 40, 20) {
+            $wb = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(34, $accent))
+            $g.FillPie($wb, $cx - $wr, $cy - $wr, $wr * 2, $wr * 2, [float]($deg - $span), [float]$span)
+        }
+    }
+
     # sweep line toward upper right
     $sweepW = if ($small) { [Math]::Max(1.6, $s / 7) } else { [Math]::Max(1.5, $s / 26) }
     $sweep = New-Object System.Drawing.Pen $accent, $sweepW
@@ -56,6 +69,10 @@ function New-RadarBitmap([int]$size, [string]$state) {
     $g.DrawLine($sweep, $cx, $cy, $ex, $ey)
 
     function Blip([float]$bx, [float]$by, [float]$br, $col) {
+        if ($size -gt 24) {
+            $glow = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(70, $col))
+            $g.FillEllipse($glow, $bx - $br * 1.9, $by - $br * 1.9, $br * 3.8, $br * 3.8)
+        }
         $g.FillEllipse((New-Object System.Drawing.SolidBrush $col), $bx - $br, $by - $br, $br * 2, $br * 2)
     }
     if ($state -eq 'app') {
@@ -64,9 +81,14 @@ function New-RadarBitmap([int]$size, [string]$state) {
         Blip ($cx - $s * 0.22) ($cy + $s * 0.10) $br (New-Color $colors.orange)
         Blip ($cx + $s * 0.12) ($cy + $s * 0.26) $br (New-Color $colors.red)
     } else {
-        $br = if ($small) { $s * 0.16 } else { $s * 0.09 }
+        $br = if ($small) { $s * 0.18 } else { $s * 0.09 }
         Blip ($cx - $s * 0.14) ($cy + $s * 0.18) $br $accent
     }
+    # light rim: keeps the navy tile visible against a dark taskbar
+    $rimW = [Math]::Max(1.0, $s / 40)
+    $rim = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(150, 120, 150, 185)), $rimW
+    $rimPath = Get-RoundedPath ($rimW / 2) ($rimW / 2) ($s - $rimW) ($s - $rimW) ($s * 0.22 - $rimW / 2)
+    $g.DrawPath($rim, $rimPath)
     $g.Dispose()
     $bmp
 }

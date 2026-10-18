@@ -10,6 +10,8 @@ public interface IKbSource
     string Name { get; }
     /// <summary>Fetch and parse one KB. Returns Status Blocked/Failed/NotFound instead of throwing on HTTP problems.</summary>
     Task<KbData> FetchAsync(string kb, CancellationToken ct);
+    /// <summary>Sources can be switched off from settings without rebuilding the chain.</summary>
+    bool IsEnabled => true;
 }
 
 /// <summary>Limits concurrency and enforces a minimum gap between request starts.</summary>
@@ -56,7 +58,7 @@ public sealed class SupportSiteSource : IKbSource
     public const string DefaultUserAgent =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 
-    private readonly HttpClient _http;
+    private readonly Func<HttpClient> _http;
     private readonly RequestGate _gate;
     private readonly ILog _log;
     private readonly Func<DateTime> _now;
@@ -66,6 +68,11 @@ public sealed class SupportSiteSource : IKbSource
     public string Name => "support.microsoft.com";
 
     public SupportSiteSource(HttpClient http, RequestGate gate, ILog? log = null,
+        Func<DateTime>? now = null, Func<TimeSpan, CancellationToken, Task>? delay = null, int maxAttempts = 3)
+        : this(() => http, gate, log, now, delay, maxAttempts) { }
+
+    /// <summary>Client is resolved per request so proxy / user-agent changes in Settings apply without a restart.</summary>
+    public SupportSiteSource(Func<HttpClient> http, RequestGate gate, ILog? log = null,
         Func<DateTime>? now = null, Func<TimeSpan, CancellationToken, Task>? delay = null, int maxAttempts = 3)
     {
         _http = http;
@@ -105,7 +112,7 @@ public sealed class SupportSiteSource : IKbSource
             {
                 var (code, body, finalUrl) = await _gate.RunAsync(async () =>
                 {
-                    using var resp = await _http.GetAsync(url, ct).ConfigureAwait(false);
+                    using var resp = await _http().GetAsync(url, ct).ConfigureAwait(false);
                     var text = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
                     return (resp.StatusCode, text, resp.RequestMessage?.RequestUri?.ToString());
                 }, ct).ConfigureAwait(false);
@@ -153,13 +160,16 @@ public sealed class SupportSiteSource : IKbSource
 public sealed class KbFetcher
 {
     private readonly IReadOnlyList<IKbSource> _sources;
+    private readonly IReadOnlyList<IKbEnricher> _enrichers;
     private readonly KbCache _cache;
     private readonly ILog _log;
     private readonly Func<DateTime> _now;
 
-    public KbFetcher(IEnumerable<IKbSource> sources, KbCache cache, ILog? log = null, Func<DateTime>? now = null)
+    public KbFetcher(IEnumerable<IKbSource> sources, KbCache cache, ILog? log = null, Func<DateTime>? now = null,
+        IEnumerable<IKbEnricher>? enrichers = null)
     {
         _sources = sources.ToList();
+        _enrichers = enrichers?.ToList() ?? new List<IKbEnricher>();
         _cache = cache;
         _log = log ?? NullLog.Instance;
         _now = now ?? (() => DateTime.UtcNow);
@@ -173,30 +183,42 @@ public sealed class KbFetcher
         var now = _now();
         if (!KbCache.NeedsRefresh(cached, update.InstalledOn, now, scanning, force)) return cached;
 
-        KbData? last = null;
+        KbData? first = null;
+        var errors = new List<string>();
         foreach (var src in _sources)
         {
+            if (!src.IsEnabled) continue;
             var d = await src.FetchAsync(update.Kb, ct).ConfigureAwait(false);
-            last = d;
+            first ??= d;
             if (d.Status == KbStatus.Ok)
             {
+                // Source A succeeded: let enrichers add anything it lacks (release health known issues).
+                if (ReferenceEquals(src, _sources[0]))
+                {
+                    foreach (var e in _enrichers.Where(e => e.IsEnabled))
+                    {
+                        try { await e.EnrichAsync(d, ct).ConfigureAwait(false); }
+                        catch (Exception ex) when (ex is not OperationCanceledException) { _log.Warn($"{update.Kb}: enrichment failed: {ex.Message}"); }
+                    }
+                }
                 d.ConsecutiveFailures = 0;
                 d.NextRetryUtc = null;
                 if (cached?.ContentHash == d.ContentHash && cached.Status == KbStatus.Ok) _log.Debug($"{update.Kb}: unchanged");
                 _cache.Save(d);
                 return d;
             }
+            errors.Add($"{src.Name}: {d.LastError ?? d.Status.ToString()}");
             _log.Info($"{update.Kb}: {src.Name} -> {d.Status} ({d.LastError})");
         }
 
         // Every source failed. Keep previous good content if we have it; record the failure.
         var failures = (cached?.ConsecutiveFailures ?? 0) + 1;
-        var keep = cached is { Status: KbStatus.Ok } ? cached : last ?? new KbData { Kb = update.Kb, Status = KbStatus.Failed, Source = "none" };
+        var keep = cached is { Status: KbStatus.Ok } ? cached : first ?? new KbData { Kb = update.Kb, Status = KbStatus.Failed, Source = "none" };
         keep.ConsecutiveFailures = failures;
-        // 404 means Microsoft has no article for this update: do not hammer the site, look again in a week.
-        var noArticle = last?.Status == KbStatus.NotFound;
+        // 404 on the support site means Microsoft has no article for this update: do not hammer it, look again in a week.
+        var noArticle = first?.Status == KbStatus.NotFound;
         keep.NextRetryUtc = now + (noArticle ? TimeSpan.FromDays(7) : KbCache.RetryDelay(failures));
-        keep.LastError = last?.LastError ?? "No source available";
+        keep.LastError = errors.Count > 0 ? string.Join("; ", errors) : "No source available";
         if (keep.Status != KbStatus.Ok) keep.FetchedUtc = now;
         _cache.Save(keep);
         return keep;

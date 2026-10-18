@@ -10,6 +10,7 @@
     <AssemblyName>PatchRadar</AssemblyName>
     <RootNamespace>PatchRadar</RootNamespace>
     <Product>PatchRadar</Product>
+    <NoWarn>$(NoWarn);WPF0001</NoWarn>
     <UpdateFlavour Condition="'$(UpdateFlavour)' == ''">full</UpdateFlavour>
   </PropertyGroup>
 

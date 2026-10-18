@@ -125,6 +125,8 @@ public partial class DetailWindow : Window
 
         if (kb.Structure == KbStructure.Unknown)
             Body.Children.Add(Text("This page has no recognised KB structure; text was scanned for keywords only.", 11, null, Brushes.Gray, new Thickness(0, 10, 0, 0)));
+        if (!string.IsNullOrWhiteSpace(kb.Notice))
+            Body.Children.Add(Text(kb.Notice, 11, null, Brushes.Gray, new Thickness(0, 10, 0, 0)));
         Body.Children.Add(Text($"Source: {kb.Source} · fetched {kb.FetchedUtc.ToLocalTime():d MMM HH:mm}", 11, null, Brushes.Gray, new Thickness(0, 12, 0, 0)));
     }
 

@@ -56,6 +56,8 @@ public sealed class KbData
     public string RawText { get; set; } = "";
     public string ContentHash { get; set; } = "";
     public string? LastError { get; set; }
+    /// <summary>Shown in the detail window when the data is partial (for example release-health fallback).</summary>
+    public string? Notice { get; set; }
     public int ConsecutiveFailures { get; set; }
     public DateTime? NextRetryUtc { get; set; }
 }

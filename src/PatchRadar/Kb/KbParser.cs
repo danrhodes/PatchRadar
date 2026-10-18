@@ -296,7 +296,7 @@ public static class KbParser
     private static readonly Regex Ws = new(@"\s+", RegexOptions.Compiled);
     private static string Clean(string s) => Ws.Replace(s.Replace(' ', ' '), " ").Trim();
 
-    private static string Hash(KbData d)
+    public static string Hash(KbData d)
     {
         var sb = new StringBuilder();
         foreach (var i in d.Improvements) sb.Append(i.Text).Append('\u001f');
