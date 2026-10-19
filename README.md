@@ -1,4 +1,5 @@
 # PatchRadar
+Author: Dan Rhodes ([@danrhodes](https://github.com/danrhodes))
 
 **A tray tool that tells you which Windows update broke it.**
 
@@ -18,8 +19,6 @@ It was built for the moment an engineer sees a symptom on a machine ("Wi-Fi 802.
 In October 2026 KB5127648 changed the `BlockNtlmv1SSO` default from Audit to Enforce. That silently broke MS-CHAPv2 based Wi-Fi (802.1X/RADIUS), Ethernet and VPN. Microsoft listed it under **Improvements**, not **Known issues**. A tool that only reads the Known issues section shows that update as safe.
 
 PatchRadar flags it red, because an improvement that matches a *change phrase* ("changing the default", "enforce mode", "will no longer") **and** a *critical keyword* ("NTLMv1", "MS-CHAPv2", "Wi-Fi", "VPN") is treated as a **behaviour change**.
-
-Author: Dan Rhodes ([@danrhodes](https://github.com/danrhodes))
 
 ## Features
 
