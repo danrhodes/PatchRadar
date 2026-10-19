@@ -19,6 +19,8 @@ In October 2026 KB5127648 changed the `BlockNtlmv1SSO` default from Audit to Enf
 
 PatchRadar flags it red, because an improvement that matches a *change phrase* ("changing the default", "enforce mode", "will no longer") **and** a *critical keyword* ("NTLMv1", "MS-CHAPv2", "Wi-Fi", "VPN") is treated as a **behaviour change**.
 
+Author: Dan Rhodes ([@danrhodes](https://github.com/danrhodes))
+
 ## Features
 
 - **Colour-coded tray icon and menu.** Green, orange, red or grey for the newest updates. The tray icon shows the worst one.
