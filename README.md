@@ -1,4 +1,5 @@
 # PatchRadar
+Author: Dan Rhodes ([@danrhodes](https://github.com/danrhodes))
 
 **A tray tool that tells you which Windows update broke it.**
 
@@ -338,19 +339,7 @@ By default PatchRadar checks GitHub Releases once a day and updates itself on th
 - SmartScreen reputation for a newly signed app builds over time; early downloads can still show a warning.
 
 ## Code signing policy
-
-Free code signing provided by [SignPath.io](https://signpath.io), certificate by [SignPath Foundation](https://signpath.org).
-
-- **Roles.** Author and Approver: `danrhodes`. Only full releases are submitted for signing, and each is approved by the Approver. Pre-releases are not signed.
-- **What is signed.** `PatchRadar-<tag>-win-x64.exe` (self-contained) and `PatchRadar-<tag>-win-x64-slim.exe` (framework-dependent). Both are built by the GitHub Actions workflow `.github/workflows/release.yml` from the `main` branch of this repository, on GitHub-hosted runners. The signing configuration is in [`.signpath/policies/patchradar/release-signing.yml`](.signpath/policies/patchradar/release-signing.yml) and [`docs/signpath/artifact-configuration.xml`](docs/signpath/artifact-configuration.xml).
-- **Verify a download.** In PowerShell:
-
-  ```powershell
-  Get-AuthenticodeSignature .\PatchRadar.exe
-  ```
-
-  `Status` must be `Valid` and the signer subject must contain `SignPath Foundation`. Anything else is not an official release. PatchRadar can also check a file itself: `PatchRadar.exe --verify result.txt <file>` writes the verdict to `result.txt`.
-- **Privacy statement.** See [Privacy](#privacy).
+Code signing provided by Certum - https://shop.certum.eu/
 
 ## Privacy
 
