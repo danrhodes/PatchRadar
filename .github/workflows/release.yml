@@ -3,8 +3,8 @@ name: Build and Release
 # Push to main  -> pre-release (unsigned; the in-app updater ignores pre-releases on the Stable channel).
 # Manual run    -> full release: pick patch / minor / major, the workflow tags the next version.
 # Pattern copied from danrhodes/Ticktower.
-# Full releases are Authenticode-signed through SignPath Foundation once SIGNPATH_API_TOKEN (secret) and
-# SIGNPATH_ORGANIZATION_ID (variable) exist. Until then a full release ships unsigned and says so in its notes.
+# Full releases are Authenticode-signed with the Certum SimplySign cloud certificate (via ssign) once the
+# CERTUM_EMAIL and CERTUM_OTP secrets exist. Until then a full release ships unsigned and says so in its notes.
 on:
   push:
     branches: [main]
@@ -84,13 +84,13 @@ jobs:
       - name: Check signing is configured
         id: sign
         env:
-          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
-          SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          CERTUM_EMAIL: ${{ secrets.CERTUM_EMAIL }}
+          CERTUM_OTP: ${{ secrets.CERTUM_OTP }}
         run: |
           $full = '${{ steps.v.outputs.full }}' -eq 'true'
-          $ready = [bool]$env:SIGNPATH_API_TOKEN -and [bool]$env:SIGNPATH_ORGANIZATION_ID
+          $ready = [bool]$env:CERTUM_EMAIL -and [bool]$env:CERTUM_OTP
           if ($full -and -not $ready) {
-            Write-Warning 'SignPath is not configured (SIGNPATH_API_TOKEN / SIGNPATH_ORGANIZATION_ID). This full release will be UNSIGNED.'
+            Write-Warning 'Certum signing is not configured (CERTUM_EMAIL / CERTUM_OTP secrets). This full release will be UNSIGNED.'
           }
           "enabled=$($full -and $ready)".ToLower() >> $env:GITHUB_OUTPUT
 
@@ -124,42 +124,29 @@ jobs:
           Copy-Item publish/full/PatchRadar.exe "publish/out/PatchRadar-$tag-win-x64.exe"
           Copy-Item publish/slim/PatchRadar.exe "publish/out/PatchRadar-$tag-win-x64-slim.exe"
 
-      # ---- Code signing (full releases only; guide.md section 11.2) ----------------------------------
+      # ---- Code signing (full releases only) ---------------------------------------------------------
       # Order matters: sign first, then checksum, then attest. Signing changes the file hash.
-      # The GitHub artifact is itself a ZIP, so the two exes are uploaded directly (artifact configuration
-      # root = zip-file; reference copy in docs/signpath/artifact-configuration.xml).
-      - name: Upload unsigned exes
-        id: upload-unsigned
+      # ssign (https://github.com/Le-Syl21/ssign, MIT) signs through Certum's SimplySign cloud API, so no
+      # SimplySign Desktop is needed. It is pinned to a release and checked against a known SHA-256 because it
+      # handles the TOTP seed; bump both together after reviewing a new release.
+      - name: Sign with Certum SimplySign
         if: steps.sign.outputs.enabled == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: PatchRadar-unsigned
-          path: publish/out/*.exe
-          if-no-files-found: error
-          retention-days: 7
-
-      - name: Sign with SignPath
-        if: steps.sign.outputs.enabled == 'true'
-        uses: signpath/github-action-submit-signing-request@v2
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
-          project-slug: patchradar
-          signing-policy-slug: release-signing
-          artifact-configuration-slug: default
-          github-artifact-id: ${{ steps.upload-unsigned.outputs.artifact-id }}
-          wait-for-completion: true
-          wait-for-completion-timeout-in-seconds: 3600
-          output-artifact-directory: signed
-
-      - name: Replace unsigned exes with signed exes
-        if: steps.sign.outputs.enabled == 'true'
+        env:
+          CERTUM_EMAIL: ${{ secrets.CERTUM_EMAIL }}
+          CERTUM_OTP: ${{ secrets.CERTUM_OTP }}
         run: |
-          $signed = Get-ChildItem signed -Recurse -Filter *.exe
-          if (-not $signed) { throw 'SignPath returned no exe files.' }
-          foreach ($f in $signed) { Copy-Item $f.FullName (Join-Path publish/out $f.Name) -Force }
+          $ver = 'v0.1.8'
+          $sha = '89cbac647d19819a1a82645d2254ac51d2b34050835421294584385dadde1298'
+          Invoke-WebRequest "https://github.com/Le-Syl21/ssign/releases/download/$ver/ssign-windows-x86_64.zip" -OutFile ssign.zip
+          if ((Get-FileHash ssign.zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne $sha) { throw 'ssign download hash mismatch.' }
+          Expand-Archive ssign.zip -DestinationPath ssign-bin
+          $exes = Get-ChildItem publish/out -Filter *.exe
+          if (-not $exes) { throw 'No exes to sign.' }
+          # Email and TOTP seed come from CERTUM_EMAIL / CERTUM_OTP, never the command line.
+          & ssign-bin/ssign.exe ($exes.FullName)
+          if ($LASTEXITCODE -ne 0) { throw "ssign failed with exit code $LASTEXITCODE" }
 
-      # The job fails unless every exe carries a valid signature from SignPath Foundation.
+      # The job fails unless every exe carries a valid, timestamped signature.
       - name: Verify signatures
         if: steps.sign.outputs.enabled == 'true'
         run: |
@@ -167,8 +154,8 @@ jobs:
           Get-ChildItem publish/out -Filter *.exe | ForEach-Object {
             $sig = Get-AuthenticodeSignature $_.FullName
             $subject = if ($sig.SignerCertificate) { $sig.SignerCertificate.Subject } else { '' }
-            Write-Host "$($_.Name): $($sig.Status)  $subject"
-            if ($sig.Status -ne 'Valid' -or $subject -notlike '*SignPath Foundation*') { $bad += $_.Name }
+            Write-Host "$($_.Name): $($sig.Status)  $subject  timestamped=$([bool]$sig.TimeStamperCertificate)"
+            if ($sig.Status -ne 'Valid' -or -not $sig.TimeStamperCertificate) { $bad += $_.Name }
           }
           if ($bad) { throw "Signature check failed for: $($bad -join ', ')" }
 
