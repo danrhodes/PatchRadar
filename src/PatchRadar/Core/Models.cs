@@ -5,7 +5,8 @@ namespace PatchRadar.Core;
 
 public enum Severity { Green, Orange, Red, Grey }
 
-public enum UpdateState { Installed, Failed, Uninstalled }
+/// <summary>Pending = offered by Windows Update but not installed yet.</summary>
+public enum UpdateState { Installed, Failed, Uninstalled, Pending }
 
 public enum UpdateCategory { Security, Cumulative, DotNet, ServicingStack, Driver, Office, Definition, Other }
 
@@ -22,7 +23,15 @@ public sealed record InstalledUpdate(
     UpdateState State,
     UpdateCategory Category,
     string? SupportUrl = null,
-    string Source = "WUA");
+    string Source = "WUA",
+    int HResult = 0)
+{
+    /// <summary>False for updates Microsoft publishes no KB article for (most drivers). Their key is a hash of the title.</summary>
+    public bool HasKb => Kb.StartsWith("KB", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>What to show where a KB number normally goes.</summary>
+    public string Label => HasKb ? Kb : "No KB";
+}
 
 public sealed class KbImprovement
 {

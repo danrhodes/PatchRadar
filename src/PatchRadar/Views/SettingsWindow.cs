@@ -23,6 +23,12 @@ public sealed class SettingsWindow : Window
     private readonly CheckBox _runAtLogin = Check("Run at login");
     private readonly CheckBox _leftClick = Check("Left-click opens the menu (otherwise right-click only)");
     private readonly CheckBox _toast = Check("Show a notification when a new red update appears");
+    private readonly CheckBox _badge = Check("Show a count on the tray icon for new pending updates (clears when you open the menu)");
+    private readonly CheckBox _rebootOn = Check("Remind me to restart after a long uptime");
+    private readonly TextBox _rebootDays = new();
+    private readonly TextBox _rebootRepeat = new();
+    private readonly CheckBox _rebootServers = Check("Also remind on Windows Server (off by default: servers restart in planned windows)");
+    private readonly TextBox _rebootServerDays = new();
 
     // Scanning
     private readonly CheckBox _scanOnStartup = Check("Scan on startup");
@@ -38,6 +44,7 @@ public sealed class SettingsWindow : Window
     private readonly Dictionary<UpdateCategory, CheckBox> _categories = new();
     private readonly TextBox _excludeRegex = Multi(70);
     private readonly CheckBox _showFailed = Check("Show failed installs");
+    private readonly CheckBox _showPending = Check("Show pending updates (found by Windows Update, not installed yet)");
 
     // Severity
     private readonly TextBox _keywords = Multi(160);
@@ -47,6 +54,7 @@ public sealed class SettingsWindow : Window
 
     // Appearance
     private readonly ComboBox _theme = new() { ItemsSource = Enum.GetValues<Settings.ThemeMode>() };
+    private readonly TextBox _fontSize = new();
     private readonly Dictionary<Severity, TextBox> _colours = new();
 
     // App updates
@@ -79,7 +87,12 @@ public sealed class SettingsWindow : Window
         PreviewKeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Escape) Close(); };
 
         var tabs = new TabControl { Margin = new Thickness(12, 12, 12, 0), TabStripPlacement = Dock.Left };
-        tabs.Items.Add(Tab("General", Stack(_runAtLogin, _leftClick, _toast)));
+        tabs.Items.Add(Tab("General", Stack(_runAtLogin, _leftClick, _toast, _badge,
+            _rebootOn,
+            Row("Remind after this many days without a restart", _rebootDays),
+            Row("Remind again every this many days (0 = once per start-up)", _rebootRepeat),
+            _rebootServers,
+            Row("On a server, remind after this many days", _rebootServerDays))));
         tabs.Items.Add(Tab("Scanning", Stack(_scanOnStartup,
             Row("Startup delay (minutes, 0 = immediately)", _startupDelay),
             Row("Scan interval (minutes, 0 = never)", _interval),
@@ -100,7 +113,7 @@ public sealed class SettingsWindow : Window
             Row("History window (days, 0 = all)", _historyDays),
             Label("Categories to include"), catPanel,
             Label("Exclude titles matching these regular expressions (one per line)"), _excludeRegex,
-            _showFailed)));
+            _showFailed, _showPending)));
 
         var resetKw = MakeButton("Reset keywords to defaults", (_, _) => _keywords.Text = Join(DefaultKeywords.Critical));
         var resetPh = MakeButton("Reset phrases to defaults", (_, _) => _phrases.Text = Join(DefaultKeywords.ChangePhrases));
@@ -116,7 +129,7 @@ public sealed class SettingsWindow : Window
             _colours[sev] = tb;
             colourRows.Add(Row($"{label} (hex, e.g. #2E9E5B)", tb));
         }
-        tabs.Items.Add(Tab("Appearance", Stack(new UIElement[] { Row("Theme", _theme) }.Concat(colourRows).ToArray())));
+        tabs.Items.Add(Tab("Appearance", Stack(new UIElement[] { Row("Theme", _theme), Row("Text size (8-24, 0 = Windows default; windows apply it when opened)", _fontSize) }.Concat(colourRows).ToArray())));
 
         var clearSkip = MakeButton("Clear", (_, _) => _skipped.Text = "");
         tabs.Items.Add(Tab("App updates", Stack(
@@ -164,6 +177,12 @@ public sealed class SettingsWindow : Window
         _runAtLogin.IsChecked = s.General.RunAtLogin;
         _leftClick.IsChecked = s.General.LeftClickOpensMenu;
         _toast.IsChecked = s.General.ToastOnNewRed;
+        _badge.IsChecked = s.General.ShowIconBadge;
+        _rebootOn.IsChecked = s.RebootReminder.Enabled;
+        _rebootDays.Text = s.RebootReminder.AfterDays.ToString();
+        _rebootRepeat.Text = s.RebootReminder.RepeatDays.ToString();
+        _rebootServers.IsChecked = s.RebootReminder.RemindOnServers;
+        _rebootServerDays.Text = s.RebootReminder.ServerAfterDays.ToString();
 
         _scanOnStartup.IsChecked = s.Scanning.ScanOnStartup;
         _startupDelay.Text = s.Scanning.StartupDelayMinutes.ToString();
@@ -177,6 +196,7 @@ public sealed class SettingsWindow : Window
         foreach (var (c, cb) in _categories) cb.IsChecked = s.Updates.IncludeCategories.Contains(c);
         _excludeRegex.Text = Join(s.Updates.ExcludeTitleRegex);
         _showFailed.IsChecked = s.Updates.ShowFailed;
+        _showPending.IsChecked = s.Updates.ShowPending;
 
         // Empty list in the file means "built-in defaults": show the effective list.
         _keywords.Text = Join(s.Severity.CriticalKeywords.Count > 0 ? s.Severity.CriticalKeywords : DefaultKeywords.Critical);
@@ -185,6 +205,7 @@ public sealed class SettingsWindow : Window
         _dimReviewed.IsChecked = s.Severity.DimReviewed;
 
         _theme.SelectedItem = s.Appearance.Theme;
+        _fontSize.Text = s.Appearance.FontSize.ToString();
         _colours[Severity.Green].Text = s.Appearance.Colors.Green;
         _colours[Severity.Orange].Text = s.Appearance.Colors.Orange;
         _colours[Severity.Red].Text = s.Appearance.Colors.Red;
@@ -228,6 +249,12 @@ public sealed class SettingsWindow : Window
         s.General.RunAtLogin = _runAtLogin.IsChecked == true;
         s.General.LeftClickOpensMenu = _leftClick.IsChecked == true;
         s.General.ToastOnNewRed = _toast.IsChecked == true;
+        s.General.ShowIconBadge = _badge.IsChecked == true;
+        s.RebootReminder.Enabled = _rebootOn.IsChecked == true;
+        s.RebootReminder.AfterDays = Num(_rebootDays, "Restart reminder days", 1, 365);
+        s.RebootReminder.RepeatDays = Num(_rebootRepeat, "Restart reminder repeat", 0, 365);
+        s.RebootReminder.RemindOnServers = _rebootServers.IsChecked == true;
+        s.RebootReminder.ServerAfterDays = Num(_rebootServerDays, "Server restart reminder days", 1, 365);
 
         s.Scanning.ScanOnStartup = _scanOnStartup.IsChecked == true;
         s.Scanning.StartupDelayMinutes = Num(_startupDelay, "Startup delay", 0, 10080);
@@ -247,6 +274,7 @@ public sealed class SettingsWindow : Window
             catch (ArgumentException) { errors.Add($"Invalid regular expression: {rx}"); }
         }
         s.Updates.ShowFailed = _showFailed.IsChecked == true;
+        s.Updates.ShowPending = _showPending.IsChecked == true;
 
         var kws = Lines(_keywords.Text);
         var phr = Lines(_phrases.Text);
@@ -262,6 +290,9 @@ public sealed class SettingsWindow : Window
         s.Severity.DimReviewed = _dimReviewed.IsChecked == true;
 
         s.Appearance.Theme = (Settings.ThemeMode)(_theme.SelectedItem ?? Settings.ThemeMode.System);
+        var fontSize = Num(_fontSize, "Text size", 0, 24);
+        if (fontSize is > 0 and < 8) errors.Add("Text size must be 0 (default) or between 8 and 24");
+        s.Appearance.FontSize = fontSize;
         s.Appearance.Colors.Green = Colour(Severity.Green, "Green");
         s.Appearance.Colors.Orange = Colour(Severity.Orange, "Orange");
         s.Appearance.Colors.Red = Colour(Severity.Red, "Red");

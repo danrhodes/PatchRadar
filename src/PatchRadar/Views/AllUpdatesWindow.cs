@@ -20,15 +20,16 @@ public sealed class AllUpdatesWindow : Window
     private sealed record GridRow(UpdateRow Row, Brush Brush)
     {
         public string Severity => Row.Severity.ToString();
-        public string Kb => Row.Update.Kb;
+        public string Kb => Row.Update.HasKb ? Row.Update.Kb : "";
         public string Title => Row.Update.Title;
         public string Category => Row.Update.Category.ToString();
-        public string Installed => Row.Update.InstalledOn.LocalDateTime.ToString("yyyy-MM-dd HH:mm");
+        public string Installed => (Row.IsPending ? "offered " : "") + Row.Update.InstalledOn.LocalDateTime.ToString("yyyy-MM-dd HH:mm");
         public string Result => Row.Update.State.ToString();
         public string Reviewed => Row.Review switch { ReviewStatus.Reviewed => "Yes", ReviewStatus.ChangedSinceReviewed => "Changed", _ => "" };
         public int Hits => Row.KeywordHits;
         public string Fix => Row.FixAvailableNotInstalled ? "⬆ " + string.Join(", ", Row.FixesNotInstalled.Select(f => f.Kb).Distinct()) : "";
-        public string Notes => Row.Result.Summary ?? "";
+        public string Ignored => Row.Ignored ? "Yes" : "";
+        public string Notes => Row.FailureText ?? Row.DriverNote ?? Row.Result.Summary ?? "";
     }
 
     private readonly ScanService _scan;
@@ -47,17 +48,24 @@ public sealed class AllUpdatesWindow : Window
     private readonly ComboBox _severity = new() { Width = 100 };
     private readonly ComboBox _category = new() { Width = 130 };
     private readonly ComboBox _review = new() { Width = 170 };
+    private readonly ComboBox _since = new() { Width = 160, ToolTip = "Windows Fast Startup keeps a PC running between shutdowns, so \"since last restart\" counts from the last real boot." };
     private readonly DatePicker _from = new() { Width = 150 };
     private readonly DatePicker _to = new() { Width = 150 };
     private readonly TextBox _text = new() { Width = 160 };
     private readonly TextBox _symptom = new() { MinWidth = 260, HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly CheckBox _rank = new() { Content = "Rank by keyword matches", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0), ToolTip = "Most critical-keyword matches first, so the updates most likely to cause your symptom rise to the top" };
     private readonly CheckBox _fixOnly = new() { Content = "Fix available, not installed", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0) };
+    private readonly CheckBox _pendingOnly = new() { Content = "Pending only", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0), ToolTip = "Updates Windows has found but not installed yet" };
     private readonly CheckBox _allTime = new() { Content = "All time", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0) };
     private readonly TextBlock _count = new() { Margin = new Thickness(12, 6, 12, 8), Foreground = Brushes.Gray };
     private bool _loading;
     private bool _ready;
 
+    private const string AnyTime = "Any time";
+    private const string SinceRestart = "Since Windows started";
+    private const string Last24h = "Last 24 hours";
+    private const string Last7d = "Last 7 days";
+    private const string Last30d = "Last 30 days";
     private const string AnySeverity = "Any risk";
     private const string AnyCategory = "Any category";
     private const string AnyReview = "Any review state";
@@ -80,6 +88,8 @@ public sealed class AllUpdatesWindow : Window
         _category.SelectedIndex = 0;
         _review.ItemsSource = new[] { AnyReview, NotReviewed, Reviewed, Changed };
         _review.SelectedIndex = 0;
+        _since.ItemsSource = new[] { AnyTime, SinceRestart, Last24h, Last7d, Last30d };
+        _since.SelectedIndex = 0;
 
         var filters = new WrapPanel { Margin = new Thickness(12, 12, 12, 4) };
         void Add(string label, UIElement el)
@@ -88,9 +98,10 @@ public sealed class AllUpdatesWindow : Window
             if (el is FrameworkElement fe) fe.Margin = new Thickness(0, 0, 12, 4);
             filters.Children.Add(el);
         }
-        Add("Risk", _severity); Add("Category", _category); Add("Review", _review); Add("From", _from); Add("To", _to); Add("KB or title", _text);
+        Add("Risk", _severity); Add("Category", _category); Add("Review", _review); Add("Installed", _since); Add("From", _from); Add("To", _to); Add("KB or title", _text);
         filters.Children.Add(_allTime);
         filters.Children.Add(_fixOnly);
+        filters.Children.Add(_pendingOnly);
         filters.Children.Add(_rank);
 
         var symptomRow = new DockPanel { Margin = new Thickness(12, 0, 12, 8) };
@@ -126,12 +137,14 @@ public sealed class AllUpdatesWindow : Window
         _severity.SelectionChanged += (_, _) => Refilter();
         _category.SelectionChanged += (_, _) => Refilter();
         _review.SelectionChanged += (_, _) => Refilter();
+        _since.SelectionChanged += (_, _) => Refilter();
         _from.SelectedDateChanged += (_, _) => Refilter();
         _to.SelectedDateChanged += (_, _) => Refilter();
         _text.TextChanged += (_, _) => Refilter();
         _symptom.TextChanged += (_, _) => Refilter();
         _allTime.Click += async (_, _) => await LoadAsync();
         _fixOnly.Click += (_, _) => Refilter();
+        _pendingOnly.Click += (_, _) => Refilter();
         _rank.Click += (_, _) => Refilter();
         _grid.MouseDoubleClick += (_, e) =>
         {
@@ -177,11 +190,12 @@ public sealed class AllUpdatesWindow : Window
         _grid.Columns.Add(Col("KB", nameof(GridRow.Kb), 90));
         _grid.Columns.Add(Col("Title", nameof(GridRow.Title), 380));
         _grid.Columns.Add(Col("Category", nameof(GridRow.Category), 100));
-        _grid.Columns.Add(Col("Installed", nameof(GridRow.Installed), 130));
+        _grid.Columns.Add(Col("Installed", nameof(GridRow.Installed), 150));
         _grid.Columns.Add(Col("Result", nameof(GridRow.Result), 80));
         _grid.Columns.Add(Col("Hits", nameof(GridRow.Hits), 60));
         _grid.Columns.Add(Col("Fix", nameof(GridRow.Fix), 110));
         _grid.Columns.Add(Col("Reviewed", nameof(GridRow.Reviewed), 100));
+        _grid.Columns.Add(Col("Ignored", nameof(GridRow.Ignored), 70));
         _grid.Columns.Add(Col("Notes", nameof(GridRow.Notes), 300));
     }
 
@@ -196,7 +210,11 @@ public sealed class AllUpdatesWindow : Window
         try
         {
             var all = _allTime.IsChecked == true;
-            _all = await Task.Run(() => _scan.ListCachedAsync(all, CancellationToken.None));
+            _all = await Task.Run(async () =>
+            {
+                var pending = await _scan.ListPendingCachedAsync(CancellationToken.None);
+                return (IReadOnlyList<UpdateRow>)pending.Concat(await _scan.ListCachedAsync(all, CancellationToken.None)).ToList();
+            });
             _ready = true;
             Refilter();
         }
@@ -217,12 +235,20 @@ public sealed class AllUpdatesWindow : Window
             Category = _category.SelectedItem is string k && k != AnyCategory ? Enum.Parse<UpdateCategory>(k) : null,
             Review = _review.SelectedItem as string switch { NotReviewed => ReviewStatus.None, Reviewed => ReviewStatus.Reviewed, Changed => ReviewStatus.ChangedSinceReviewed, _ => null },
             FixNotInstalledOnly = _fixOnly.IsChecked == true,
+            Since = _since.SelectedItem as string switch
+            {
+                SinceRestart => DateTimeOffset.Now - TimeSpan.FromMilliseconds(Environment.TickCount64),
+                Last24h => DateTimeOffset.Now.AddHours(-24),
+                Last7d => DateTimeOffset.Now.AddDays(-7),
+                Last30d => DateTimeOffset.Now.AddDays(-30),
+                _ => null,
+            },
             From = _from.SelectedDate,
             To = _to.SelectedDate,
             Text = _text.Text,
             Symptom = _symptom.Text,
         };
-        _shown = UpdateFilter.Apply(_all, c);
+        _shown = UpdateFilter.Apply(_pendingOnly.IsChecked == true ? _all.Where(r => r.IsPending).ToList() : _all, c);
         if (_rank.IsChecked == true) _shown = UpdateFilter.RankByKeywordHits(_shown);
         var colours = _settings.Current.Appearance.Colors;
         _grid.ItemsSource = _shown.Select(r => new GridRow(r, SeverityBrushes.For(r.Severity, colours))).ToList();

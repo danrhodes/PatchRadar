@@ -28,7 +28,8 @@ public sealed class SingleInstance : IDisposable
 
 public static class UrlGuard
 {
-    public static string KbUrl(string kb) => $"https://support.microsoft.com/help/{kb.Trim().ToUpperInvariant().Replace("KB", "")}";
+    public static string KbUrl(string kb) =>
+        kb.StartsWith("KB", StringComparison.OrdinalIgnoreCase) ? $"https://support.microsoft.com/help/{kb.Trim().ToUpperInvariant().Replace("KB", "")}" : "";
 
     /// <summary>Only https links on Microsoft hosts may be opened.</summary>
     public static bool IsSafe(string? url)
@@ -54,8 +55,10 @@ public static class SummaryFormatter
     {
         var sb = new StringBuilder();
         var u = row.Update;
-        sb.AppendLine($"{u.Kb} - {u.Title}");
-        sb.AppendLine($"Installed: {u.InstalledOn.LocalDateTime:yyyy-MM-dd HH:mm}   Risk: {row.Severity}");
+        sb.AppendLine($"{(u.HasKb ? u.Kb + " - " : "")}{u.Title}");
+        sb.AppendLine(row.IsPending
+            ? $"Pending (not installed yet), offered since {u.InstalledOn.LocalDateTime:yyyy-MM-dd}   Risk: {row.Severity}"
+            : $"Installed: {u.InstalledOn.LocalDateTime:yyyy-MM-dd HH:mm}   Risk: {row.Severity}");
         if (row.Kb?.OsBuild is { } b) sb.AppendLine($"OS build: {b}");
         if (row.Result.MatchedKeywords.Count > 0) sb.AppendLine("Matched: " + string.Join(", ", row.Result.MatchedKeywords));
         if (row.Result.BehaviourChanges.Count > 0)
@@ -76,8 +79,8 @@ public static class SummaryFormatter
             }
         }
         if (row.Kb is null || row.Kb.Status != KbStatus.Ok)
-            sb.AppendLine().AppendLine("KB data unavailable: " + (row.Kb?.LastError ?? "not fetched yet"));
-        sb.AppendLine().AppendLine(UrlGuard.KbUrl(u.Kb));
+            sb.AppendLine().AppendLine(u.HasKb ? "KB data unavailable: " + (row.Kb?.LastError ?? "not fetched yet") : "No KB article is published for this update.");
+        if (u.HasKb) sb.AppendLine().AppendLine(UrlGuard.KbUrl(u.Kb));
         return sb.ToString();
     }
 
@@ -86,6 +89,6 @@ public static class SummaryFormatter
         var u = row.Update;
         var title = u.Title.Length > maxTitle ? u.Title[..(maxTitle - 1)] + "…" : u.Title;
         var date = u.InstalledOn.LocalDateTime.ToString("d MMM", CultureInfo.GetCultureInfo("en-GB"));
-        return $"{u.Kb} · {date} · {title}";
+        return u.HasKb ? $"{u.Kb} · {date} · {title}" : $"{date} · {title}";
     }
 }

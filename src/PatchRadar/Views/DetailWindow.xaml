@@ -8,6 +8,7 @@
         <WrapPanel DockPanel.Dock="Bottom" HorizontalAlignment="Right" Margin="0,10,0,0">
             <Button x:Name="UninstallButton" Content="Uninstall…" Padding="12,4" Margin="0,0,8,6" Click="Uninstall_Click" Visibility="Collapsed" ToolTip="Administrators only. Remove this update from this PC."/>
             <Button x:Name="ReviewButton" Content="Mark reviewed" Padding="12,4" Margin="0,0,8,6" Click="Review_Click"/>
+            <Button x:Name="IgnoreButton" Content="Ignore" Padding="12,4" Margin="0,0,8,6" Click="Ignore_Click" ToolTip="Keep it listed but stop it colouring the tray icon or raising notifications."/>
             <Button x:Name="OpenButton" Content="Open KB article" Padding="12,4" Margin="0,0,8,6" IsDefault="True" Click="Open_Click"/>
             <Button x:Name="CopyButton" Content="Copy summary" Padding="12,4" Margin="0,0,8,6" Click="Copy_Click"/>
             <Button x:Name="RefreshButton" Content="Refresh" Padding="12,4" Margin="0,0,0,6" Click="Refresh_Click"/>

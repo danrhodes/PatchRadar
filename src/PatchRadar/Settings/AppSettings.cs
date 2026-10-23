@@ -19,6 +19,24 @@ public sealed class GeneralSettings : SettingsSection
     public bool RunAtLogin { get; set; } = true;
     public bool LeftClickOpensMenu { get; set; } = true;
     public bool ToastOnNewRed { get; set; } = true;
+    /// <summary>Draw the count of pending updates you have not looked at yet on the tray icon.</summary>
+    public bool ShowIconBadge { get; set; } = true;
+}
+
+/// <summary>Nudges the user to restart after a long uptime. The switch, threshold and repeat interval are configurable.</summary>
+public sealed class RebootReminderSettings : SettingsSection
+{
+    public bool Enabled { get; set; } = true;
+    /// <summary>Remind once the PC has run this many days without a restart.</summary>
+    public int AfterDays { get; set; } = 14;
+    /// <summary>Remind again after this many days if still not restarted (0 = once per start-up only).</summary>
+    public int RepeatDays { get; set; } = 3;
+    /// <summary>Servers restart in planned maintenance windows and often have nobody at the tray, so they are off by default.</summary>
+    public bool RemindOnServers { get; set; }
+    /// <summary>Threshold used instead of AfterDays on Windows Server.</summary>
+    public int ServerAfterDays { get; set; } = 45;
+
+    public int AfterDaysFor(bool isServer) => isServer ? ServerAfterDays : AfterDays;
 }
 
 public sealed class AppUpdateSettings : SettingsSection
@@ -51,6 +69,8 @@ public sealed class UpdatesSettings : SettingsSection
     };
     public List<string> ExcludeTitleRegex { get; set; } = new() { "Security Intelligence Update", "Definition Update" };
     public bool ShowFailed { get; set; }
+    /// <summary>Also list updates Windows has found but not installed yet, with their known issues.</summary>
+    public bool ShowPending { get; set; } = true;
 }
 
 public sealed class SeveritySettings : SettingsSection
@@ -72,6 +92,8 @@ public sealed class ColorSettings : SettingsSection
 public sealed class AppearanceSettings : SettingsSection
 {
     public ThemeMode Theme { get; set; } = ThemeMode.System;
+    /// <summary>Text size for the tray menu and windows, in device-independent pixels (8-24). 0 = the Windows default.</summary>
+    public int FontSize { get; set; }
     public ColorSettings Colors { get; set; } = new();
 }
 
@@ -98,6 +120,7 @@ public sealed class AppSettings : SettingsSection
 
     public int SchemaVersion { get; set; } = CurrentSchemaVersion;
     public GeneralSettings General { get; set; } = new();
+    public RebootReminderSettings RebootReminder { get; set; } = new();
     public AppUpdateSettings AppUpdate { get; set; } = new();
     public ScanningSettings Scanning { get; set; } = new();
     public UpdatesSettings Updates { get; set; } = new();
@@ -117,6 +140,10 @@ public sealed class AppSettings : SettingsSection
             warnings.Add($"Invalid {what}; reset to default");
         }
 
+        Fix(RebootReminder.AfterDays is < 1 or > 365, "rebootReminder.afterDays", () => RebootReminder.AfterDays = 14);
+        Fix(RebootReminder.ServerAfterDays is < 1 or > 365, "rebootReminder.serverAfterDays", () => RebootReminder.ServerAfterDays = 45);
+        Fix(RebootReminder.RepeatDays is < 0 or > 365, "rebootReminder.repeatDays", () => RebootReminder.RepeatDays = 3);
+        Fix(Appearance.FontSize != 0 && Appearance.FontSize is < 8 or > 24, "appearance.fontSize", () => Appearance.FontSize = 0);
         Fix(Updates.MenuItemCount is < 5 or > 100, "updates.menuItemCount", () => Updates.MenuItemCount = 15);
         Fix(Updates.HistoryDays < 0, "updates.historyDays", () => Updates.HistoryDays = 90);
         Fix(Scanning.StartupDelayMinutes < 0, "scanning.startupDelayMinutes", () => Scanning.StartupDelayMinutes = 30);

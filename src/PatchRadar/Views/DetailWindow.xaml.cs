@@ -20,6 +20,7 @@ public partial class DetailWindow : Window
     private readonly Func<UpdateRow, Task<UpdateRow?>> _refresh;
     private readonly Func<UpdateRow, bool, UpdateRow> _setReviewed;
     private readonly Func<string, bool> _isInstalled;
+    private readonly Func<UpdateRow, bool, UpdateRow>? _setIgnored;
     private readonly UninstallService? _uninstall;
     private readonly Action? _onUninstalled;
     private UninstallPlan? _plan;
@@ -29,9 +30,10 @@ public partial class DetailWindow : Window
 
     public DetailWindow(UpdateRow row, ColorSettings colors, Func<UpdateRow, Task<UpdateRow?>> refresh,
         Func<UpdateRow, bool, UpdateRow> setReviewed, Func<string, bool> isInstalled, ILog log,
-        UninstallService? uninstall = null, Action? onUninstalled = null)
+        UninstallService? uninstall = null, Action? onUninstalled = null, Func<UpdateRow, bool, UpdateRow>? setIgnored = null)
     {
         InitializeComponent();
+        _setIgnored = setIgnored;
         _row = row;
         _colors = colors;
         _refresh = refresh;
@@ -67,14 +69,29 @@ public partial class DetailWindow : Window
     private void Render()
     {
         var u = _row.Update;
-        Title = $"{u.Kb} - PatchRadar";
+        Title = $"{u.Label} - PatchRadar";
         Body.Children.Clear();
 
-        Body.Children.Add(Text(u.Kb, 18, FontWeights.Bold));
+        Body.Children.Add(Text(u.Label, 18, FontWeights.Bold));
+        OpenButton.Visibility = u.HasKb ? Visibility.Visible : Visibility.Collapsed;
         Body.Children.Add(Text(u.Title, 12, null));
-        var meta = $"Installed {u.InstalledOn.LocalDateTime:d MMM yyyy HH:mm} · {u.State}";
+        var meta = _row.IsPending
+            ? $"Pending: not installed yet · offered since {u.InstalledOn.LocalDateTime:d MMM yyyy}"
+            : $"Installed {u.InstalledOn.LocalDateTime:d MMM yyyy HH:mm} · {u.State}";
         if (_row.Kb?.OsBuild is { } build) meta += $" · OS build {build}";
         Body.Children.Add(Text(meta, 11, null, Brushes.Gray));
+        if (_row.FailureText is { } failure)
+            Body.Children.Add(Text("Why it failed: " + failure, 12, null, SeverityBrush(Severity.Red)));
+        if (_row.DriverNote is { } driver)
+            Body.Children.Add(Text("Driver: " + driver, 12, null, null, new Thickness(0, 4, 0, 0)));
+        if (_row.Advice is { } advice)
+            Body.Children.Add(new Border
+            {
+                Background = new SolidColorBrush(Color.FromArgb(40, 128, 128, 128)),
+                BorderBrush = SeverityBrush(_row.Severity), BorderThickness = new Thickness(2, 0, 0, 0),
+                Padding = new Thickness(8, 4, 8, 4), Margin = new Thickness(0, 8, 0, 0),
+                Child = Text(advice, 12, FontWeights.SemiBold),
+            });
 
         // Severity pill + keyword chips
         var chips = new WrapPanel { Margin = new Thickness(0, 6, 0, 0) };
@@ -86,9 +103,14 @@ public partial class DetailWindow : Window
         Body.Children.Add(chips);
 
         // The Uninstall button exists only when the feature is on, the user is an administrator, and removal is really possible.
-        _plan = _uninstall?.PlanIfOffered(_row.Update);
+        _plan = _row.IsPending ? null : _uninstall?.PlanIfOffered(_row.Update);
         UninstallButton.Visibility = _plan is null ? Visibility.Collapsed : Visibility.Visible;
         if (_plan is not null) { UninstallButton.Background = SeverityBrush(Severity.Red); UninstallButton.Foreground = Brushes.White; }
+
+        IgnoreButton.Content = _row.Ignored ? "Stop ignoring" : "Ignore";
+        IgnoreButton.Visibility = _setIgnored is null ? Visibility.Collapsed : Visibility.Visible;
+        if (_row.Ignored)
+            Body.Children.Add(Text("Ignored: this update stays listed but does not colour the tray icon or raise notifications.", 11, null, Brushes.Gray, new Thickness(0, 4, 0, 0)));
 
         // A reviewed update whose article has since changed must not look settled.
         ReviewButton.Content = _row.Review == ReviewStatus.None ? "Mark reviewed" : "Mark not reviewed";
@@ -112,6 +134,12 @@ public partial class DetailWindow : Window
 
 
         var kb = _row.Kb;
+        if (!u.HasKb)
+        {
+            Body.Children.Add(Heading("No KB article"));
+            Body.Children.Add(Text("Microsoft publishes no KB article for this update (this is normal for drivers), so PatchRadar has no known issues to show. It is waiting to be installed.", 12));
+            return;
+        }
         if (kb is null || kb.Status != KbStatus.Ok)
         {
             Body.Children.Add(Heading(kb?.Status == KbStatus.NotFound ? "No KB article" : "KB data unavailable"));
@@ -404,6 +432,13 @@ public partial class DetailWindow : Window
     {
         try { Update(_setReviewed(_row, _row.Review == ReviewStatus.None)); }
         catch (Exception ex) { _log.Error("Mark reviewed failed", ex); }
+    }
+
+    private void Ignore_Click(object sender, RoutedEventArgs e)
+    {
+        if (_setIgnored is null) return;
+        try { Update(_setIgnored(_row, !_row.Ignored)); }
+        catch (Exception ex) { _log.Error("Ignore failed", ex); }
     }
 
     private void Open_Click(object sender, RoutedEventArgs e) => UrlGuard.OpenInBrowser(UrlGuard.KbUrl(_row.Update.Kb), _log);

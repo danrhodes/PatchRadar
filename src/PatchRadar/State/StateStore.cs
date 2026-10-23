@@ -22,6 +22,15 @@ public sealed class AppState
     /// <summary>KB -> review record (guide section 9).</summary>
     public Dictionary<string, ReviewEntry> Reviewed { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>Update key (KB or driver key) -> when the user chose to ignore it.</summary>
+    public Dictionary<string, IgnoreEntry> Ignored { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Pending updates the user has already looked at, so the tray badge only flags new ones.</summary>
+    public Dictionary<string, DateTime> PendingSeen { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>When the last restart reminder was shown.</summary>
+    public DateTime? LastRebootReminderUtc { get; set; }
+
     /// <summary>When the user last opened "What's changed".</summary>
     public DateTime? LastDigestSeenUtc { get; set; }
 
@@ -72,6 +81,8 @@ public sealed class StateStore
             var s = JsonSerializer.Deserialize<AppState>(File.ReadAllText(_path), SettingsStore.JsonOptions) ?? new AppState();
             s.Notified = new Dictionary<string, string>(s.Notified, StringComparer.OrdinalIgnoreCase);
             s.Reviewed = new Dictionary<string, ReviewEntry>(s.Reviewed, StringComparer.OrdinalIgnoreCase);
+            s.Ignored = new Dictionary<string, IgnoreEntry>(s.Ignored ?? new(), StringComparer.OrdinalIgnoreCase);
+            s.PendingSeen = new Dictionary<string, DateTime>(s.PendingSeen ?? new(), StringComparer.OrdinalIgnoreCase);
             return s;
         }
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)

@@ -22,7 +22,7 @@ public static class Exporters
 
     internal static string Date(DateTimeOffset d) => d.LocalDateTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
     internal static string Result(UpdateRow r) => r.Update.State.ToString();
-    internal static string Summary(UpdateRow r) => r.Result.Summary ?? "";
+    internal static string Summary(UpdateRow r) => r.FailureText ?? r.Result.Summary ?? "";
 }
 
 public static class CsvExporter
@@ -38,7 +38,7 @@ public static class CsvExporter
         {
             var cells = new[]
             {
-                r.Severity.ToString(), r.Update.Kb, r.Update.Title, r.Update.Category.ToString(), Exporters.Date(r.Update.InstalledOn),
+                r.Severity.ToString(), r.Update.HasKb ? r.Update.Kb : "", r.Update.Title, r.Update.Category.ToString(), Exporters.Date(r.Update.InstalledOn),
                 Exporters.Result(r), r.Kb?.OsBuild ?? "", string.Join("; ", r.Result.MatchedKeywords), r.KeywordHits.ToString(), string.Join("; ", r.FixesNotInstalled.Select(f => f.Kb).Distinct()), Exporters.Summary(r), UrlGuard.KbUrl(r.Update.Kb), r.Review.ToString(),
             };
             sb.Append(string.Join(",", cells.Select(Escape))).Append("\r\n");
@@ -92,7 +92,7 @@ public static class MarkdownExporter
             var note = Exporters.Summary(r);
             if (r.Result.MatchedKeywords.Count > 0) note += (note.Length > 0 ? " " : "") + "(" + string.Join(", ", r.Result.MatchedKeywords) + ")";
             sb.Append("| ").Append(r.Severity)
-              .Append(" | [").Append(r.Update.Kb).Append("](").Append(UrlGuard.KbUrl(r.Update.Kb)).Append(')')
+              .Append(" | ").Append(r.Update.HasKb ? $"[{r.Update.Kb}]({UrlGuard.KbUrl(r.Update.Kb)})" : "no KB")
               .Append(" | ").Append(Exporters.Date(r.Update.InstalledOn))
               .Append(" | ").Append(Cell(r.Update.Title))
               .Append(" | ").Append(Cell(note)).AppendLine(" |");

@@ -32,15 +32,36 @@ public sealed record UpdateRow(InstalledUpdate Update, KbData? Kb, SeverityResul
 
     /// <summary>A fix is published but not installed here, and no newer cumulative update probably covers it.</summary>
     public bool FixAvailableNotInstalled => FixesNotInstalled.Count > 0;
+
+    /// <summary>Offered by Windows Update but not installed yet.</summary>
+    public bool IsPending => Update.State == UpdateState.Pending;
+
+    /// <summary>The user chose to stop worrying about this update: still listed, but no icon colour or toast.</summary>
+    public bool Ignored { get; init; }
+
+    /// <summary>How a pending driver compares with the version already installed (null for non-drivers).</summary>
+    public string? DriverNote { get; init; }
+
+    /// <summary>Plain-English reason a failed install failed, when Windows gave a code.</summary>
+    public string? FailureText => Update.State == UpdateState.Failed && Update.HResult != 0 ? WuErrors.Describe(Update.HResult) : null;
+
+    /// <summary>One-line advice on whether to install a pending update now.</summary>
+    public string? Advice => DeferAdvice.For(this);
 }
 
 public sealed record ScanResult(IReadOnlyList<UpdateRow> Rows, DateTime ScannedAt, int Fetched, int Failed)
 {
     public static readonly ScanResult Empty = new(Array.Empty<UpdateRow>(), DateTime.MinValue, 0, 0);
 
+    /// <summary>Updates Windows has found but not installed yet, with their KB findings.</summary>
+    public IReadOnlyList<UpdateRow> Pending { get; init; } = Array.Empty<UpdateRow>();
+
+    /// <summary>Windows has finished installing something that needs a restart to take effect.</summary>
+    public bool RestartPending { get; init; }
+
     public Severity Worst(int take = int.MaxValue)
     {
-        var sev = Rows.Take(take).Select(r => r.Severity).ToList();
+        var sev = Rows.Where(r => !r.Ignored).Take(take).Select(r => r.Severity).ToList();
         if (sev.Count == 0) return Severity.Grey;
         if (sev.Contains(Severity.Red)) return Severity.Red;
         if (sev.Contains(Severity.Orange)) return Severity.Orange;
@@ -73,14 +94,25 @@ public sealed class ScanService
         _installed = new HashSet<string>(installed.Select(u => u.Kb), StringComparer.OrdinalIgnoreCase);
     }
 
-    public ScanService(IUpdateHistoryProvider history, KbFetcher fetcher, Func<AppSettings> settings, ILog? log = null, ReviewStore? reviews = null)
+    private readonly IPendingUpdateProvider? _pending;
+    private readonly IgnoreStore? _ignores;
+    private readonly IRestartDetector? _restart;
+
+    public ScanService(IUpdateHistoryProvider history, KbFetcher fetcher, Func<AppSettings> settings, ILog? log = null, ReviewStore? reviews = null,
+        IPendingUpdateProvider? pending = null, IgnoreStore? ignores = null, IRestartDetector? restart = null)
     {
+        _pending = pending;
+        _ignores = ignores;
+        _restart = restart;
         _reviews = reviews;
         _history = history;
         _fetcher = fetcher;
         _settings = settings;
         _log = log ?? NullLog.Instance;
     }
+
+    /// <summary>Upper bound on pending articles fetched in one scan (a machine that was off for months can have dozens).</summary>
+    private const int MaxPendingFetched = 20;
 
     public bool IsScanning => _scanLock.CurrentCount == 0;
 
@@ -94,6 +126,41 @@ public sealed class ScanService
         var engine = new SeverityEngine(s.ToSeverityOptions());
         var snap = Snapshot();
         return filtered.Select(u => MakeRow(u, _fetcher.GetCached(u.Kb), engine, snap)).ToList();
+    }
+
+    /// <summary>Pending updates (offered, not installed) after filters. Empty when the feature is off or Windows Update cannot be read.</summary>
+    private async Task<IReadOnlyList<InstalledUpdate>> GetPendingAsync(bool online, CancellationToken ct)
+    {
+        var s = _settings();
+        if (_pending is null || !s.Updates.ShowPending) return Array.Empty<InstalledUpdate>();
+        try
+        {
+            IReadOnlyList<InstalledUpdate> found;
+            try { found = await _pending.GetAsync(online, ct).ConfigureAwait(false); }
+            catch (Exception ex) when (online && ex is not OperationCanceledException)
+            {
+                // Offline or Windows Update unreachable: fall back to what Windows last found.
+                _log.Warn($"Online pending search failed ({ex.Message}); using the local store");
+                found = await _pending.GetAsync(false, ct).ConfigureAwait(false);
+            }
+            return UpdateMerger.FilterPending(found, s.Updates, IsInstalled);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _log.Warn($"Pending update search failed: {ex.Message}");
+            return Array.Empty<InstalledUpdate>();
+        }
+    }
+
+    /// <summary>Pending updates with severity from whatever is cached. No KB network calls.</summary>
+    public async Task<IReadOnlyList<UpdateRow>> ListPendingCachedAsync(CancellationToken ct)
+    {
+        var s = _settings();
+        var pending = await GetPendingAsync(online: false, ct).ConfigureAwait(false);
+        var engine = new SeverityEngine(s.ToSeverityOptions());
+        var snap = Snapshot();
+        return pending.Select(u => MakeRow(u, _fetcher.GetCached(u.Kb), engine, snap)).ToList();
     }
 
     /// <summary>Force-refresh one update's KB data (Detail window Refresh/Retry).</summary>
@@ -110,6 +177,13 @@ public sealed class ScanService
 
     private UpdateRow MakeRow(InstalledUpdate u, KbData? kb, SeverityEngine engine, ReviewSnapshot reviews)
     {
+        if (!u.HasKb)
+            return new UpdateRow(u, null, new SeverityResult { Severity = Severity.Grey, Summary = "No KB article is published for this update, so there are no known issues to read." })
+            {
+                Ignored = _ignores?.IsIgnored(u.Kb) == true,
+                DriverNote = u.State == UpdateState.Pending ? DriverInfo.Compare(u, _installedList) : null,
+            };
+
         var ok = kb is { Status: KbStatus.Ok };
         var status = reviews.StatusOf(u.Kb, ok ? kb!.ContentHash : null);
         KbDiffResult? diff = null;
@@ -126,7 +200,7 @@ public sealed class ScanService
                 fixes.Add(new FixInfo(i.ResolvedInKb!, IsInstalled(i.ResolvedInKb!), i.OutOfBandFix, i.PartialFix,
                     string.IsNullOrWhiteSpace(i.Title) ? i.Symptom : i.Title!, i.Status == IssueStatus.Resolved));
 
-        var newer = _installedList.Any(x => x.Kb != u.Kb && x.InstalledOn > u.InstalledOn &&
+        var newer = u.State != UpdateState.Pending && _installedList.Any(x => x.Kb != u.Kb && x.InstalledOn > u.InstalledOn &&
                                             x.Category is UpdateCategory.Cumulative or UpdateCategory.Security);
         return new UpdateRow(u, kb, engine.Evaluate(kb))
         {
@@ -135,7 +209,23 @@ public sealed class ScanService
             ChangeSinceReview = diff,
             Fixes = fixes,
             NewerCumulativeInstalled = newer,
+            Ignored = _ignores?.IsIgnored(u.Kb) == true,
+            DriverNote = u.State == UpdateState.Pending ? DriverInfo.Compare(u, _installedList) : null,
         };
+    }
+
+    /// <summary>Ignore or stop ignoring one update and return the updated row.</summary>
+    public UpdateRow SetIgnored(UpdateRow row, bool ignored)
+    {
+        _ignores?.Set(row.Update.Kb, ignored);
+        return row with { Ignored = ignored };
+    }
+
+    /// <summary>True when Windows needs a restart to finish installing updates.</summary>
+    public bool IsRestartPending()
+    {
+        try { return _restart?.IsRestartPending() == true; }
+        catch (Exception ex) { _log.Warn("Restart check failed: " + ex.Message); return false; }
     }
 
     /// <summary>Flip one row's reviewed flag and return the updated row.</summary>
@@ -191,14 +281,38 @@ public sealed class ScanService
                 progress?.Report((++done, targets.Count));
             }
 
+            // Pending updates: read the article for each so the user can prepare before installing.
+            var pending = await GetPendingAsync(online: true, ct).ConfigureAwait(false);
+            _log.Info($"Scan: {pending.Count} pending updates");
+            foreach (var u in pending.Where(p => p.HasKb).Take(MaxPendingFetched))
+            {
+                ct.ThrowIfCancellationRequested();
+                try
+                {
+                    var kb = await _fetcher.GetAsync(u, s.Scanning, force, ct).ConfigureAwait(false);
+                    results[u.Kb] = kb;
+                    if (kb?.Status != KbStatus.Ok) failed++;
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex)
+                {
+                    _log.Error($"Fetch pending {u.Kb} failed", ex);
+                    failed++;
+                }
+            }
+
             var engine = new SeverityEngine(s.ToSeverityOptions());
             var snap = Snapshot();
-            var rows = updates.Select(u =>
+            UpdateRow Row(InstalledUpdate u)
             {
                 var kb = results.TryGetValue(u.Kb, out var k) ? k : _fetcher.GetCached(u.Kb);
                 return MakeRow(u, kb, engine, snap);
-            }).ToList();
-            return new ScanResult(rows, DateTime.Now, fetched, failed);
+            }
+            return new ScanResult(updates.Select(Row).ToList(), DateTime.Now, fetched, failed)
+            {
+                Pending = pending.Select(Row).ToList(),
+                RestartPending = IsRestartPending(),
+            };
         }
         finally { _scanLock.Release(); }
     }

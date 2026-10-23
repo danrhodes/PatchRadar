@@ -16,6 +16,8 @@ public sealed record UpdateFilterCriteria
     public ReviewStatus? Review { get; init; }
     /// <summary>Only updates with a published fix that is not installed on this PC.</summary>
     public bool FixNotInstalledOnly { get; init; }
+    /// <summary>Only updates installed at or after this moment. Pending updates are never hidden by it.</summary>
+    public DateTimeOffset? Since { get; init; }
 }
 
 public static class UpdateFilter
@@ -30,6 +32,7 @@ public static class UpdateFilter
             if (c.Category is { } cat && r.Update.Category != cat) return false;
             if (c.Review is { } rv && r.Review != rv) return false;
             if (c.FixNotInstalledOnly && !r.FixAvailableNotInstalled) return false;
+            if (c.Since is { } since && !r.IsPending && r.Update.InstalledOn < since) return false;
             var local = r.Update.InstalledOn.LocalDateTime.Date;
             if (c.From is { } f && local < f.Date) return false;
             if (c.To is { } t && local > t.Date) return false;

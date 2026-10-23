@@ -26,6 +26,14 @@ PatchRadar flags it red, because an improvement that matches a *change phrase* (
 - **Known issues with what to do next.** Every issue is a collapsible card with clearly labelled **Symptom**, **Workaround**, **Resolution** and **Fix** sections, plus an **At a glance** summary: how many issues are active, which have a fix or workaround, and which have *nothing published yet*.
 - **Fix tracking.** When an article or Windows release health names the update that fixes an issue (including **out-of-band** and **partial** fixes), PatchRadar links it and tells you whether that update is **already installed on this PC**.
 - **Flags fixes you have not installed.** A tray row, the detail window and the All Updates grid show **⬆ fix available** when Microsoft names a fix (including out-of-band updates) that is not on this PC. If a newer cumulative update is installed, it says that update probably already includes it.
+- **Pending updates, before you install them.** Updates Windows Update has found but not yet installed are listed first in the tray menu (and in All Updates under **Pending only**), read and coloured like installed ones, so you can see the known issues and behaviour changes in advance. A toast warns when a pending update looks risky. Turn it off in Settings > Updates.
+- **Pending briefing.** *Pending briefing…* in the tray menu writes a Markdown note for the updates waiting to install: risk, known issues, workarounds, behaviour changes and one line of advice (for example "Consider deferring: 2 active known issues with no fix or workaround"). Copy it into a ticket or save it. Drivers, which have no KB article, are listed too, with a comparison against the version already installed.
+- **Restart needed, and restart reminders.** The tray menu shows how long the PC has been up and says when Windows is waiting for a restart to finish installing updates. After 14 days without a restart (configurable, repeating every 3 days) a notification reminds you. Off on Windows Server unless you turn it on, with its own longer threshold. See Settings > General.
+- **New-pending badge.** A count on the tray icon flags pending updates you have not looked at yet. It clears when you open the menu and returns when something new turns up.
+- **Why an install failed.** Failed installs show the Windows Update error code with a plain-English cause and the usual fix.
+- **Ignore an update.** *Ignore* on the detail window keeps an update listed but stops it colouring the icon or raising notifications.
+- **Since Windows started.** The All Updates window can filter to updates installed since Windows last started, or in the last day, week or month.
+- **Headless report.** `PatchRadar.exe --report out.json` (or `.csv`, `.md`; add `--briefing` for the pending briefing) scans once with no UI. The exit code is 0 when nothing is red, 1 when a red update is pending, 2 when a red update is already installed, and 3 if the scan failed. Suits scheduled tasks and RMM tools.
 - **Behaviour-change detection** in the Improvements section.
 - **Before and after.** When Microsoft edits an article you had reviewed, the detail window shows exactly what changed: added, removed and edited issues, workarounds, fixes and improvements, each with a BEFORE and AFTER.
 - **What's changed since I last looked.** One list of new updates, edited articles, updates that became riskier, newly named fixes and reviewed items that changed, with a badge in the tray menu.
@@ -35,7 +43,7 @@ PatchRadar flags it red, because an improvement that matches a *change phrase* (
 - **Mark reviewed.** Flag an update as dealt with. If Microsoft later edits the article, PatchRadar shows **changed since reviewed**.
 - **Export** the list as CSV, JSON or a Markdown table that pastes cleanly into a ticket. **Copy summary** puts one update's findings on the clipboard.
 - **Notifications** for new red updates, once per update per article revision.
-- **Light, dark or follow-the-system theme**, and every threshold, keyword and colour is configurable.
+- **Light, dark or follow-the-system theme, adjustable text size**, and every threshold, keyword and colour is configurable.
 - **Self-updating** from GitHub Releases, with checksum verification and automatic rollback.
 - **No telemetry, no service, no admin rights.**
 
@@ -137,9 +145,12 @@ Left- or right-click the icon (left-click is configurable). Top to bottom:
 | Item | What it does |
 |---|---|
 | Header | Time of the last scan and the next one. Shows `Scanning… (3/15)` while working. |
+| Uptime, restart | **Up 17 days** (orange with "consider restarting" past the reminder threshold), and a line when Windows is waiting for a restart. |
+| Pending | Updates Windows has found but not installed, above the installed list. Drivers with no KB article are listed too. |
 | Update rows | The newest updates (15 by default), newest first. Dot and text are coloured by risk. A tick and dimmed text mean you marked it reviewed; **⬆ fix available** means a fix exists that is not installed here; **changed since reviewed** means Microsoft edited an article you had reviewed. Hover for the first matched issue. Click to open the detail window. |
 | Scan now | Rescans and refreshes updates inside the recent window. |
 | View all updates… | The full list with filters and symptom search. |
+| Pending briefing (N)… | A copyable Markdown note on everything waiting to install, with advice on each. |
 | What's changed (N)… | Everything that changed since you last looked. The number counts updates with news. |
 | Export… | CSV, JSON, Markdown, or copy as Markdown. |
 | Settings… | Every setting. Changes apply immediately. |
@@ -271,6 +282,12 @@ Settings live in `%APPDATA%\PatchRadar\settings.json`. Use the Settings window, 
 | general | `runAtLogin` | `true` | Start at login (HKCU Run). |
 | | `leftClickOpensMenu` | `true` | Otherwise right-click only. |
 | | `toastOnNewRed` | `true` | Notify once per red update per article revision. |
+| | `showIconBadge` | `true` | Count of unseen pending updates on the tray icon; clears when you open the menu. |
+| rebootReminder | `enabled` | `true` | Remind you to restart after a long uptime. |
+| | `afterDays` | `14` | Days without a restart before the first reminder (1 to 365). |
+| | `repeatDays` | `3` | Remind again every this many days. `0` reminds once per start-up. |
+| | `remindOnServers` | `false` | Windows Server is off by default; servers restart in planned windows. |
+| | `serverAfterDays` | `45` | Threshold used on Windows Server when `remindOnServers` is on. |
 | scanning | `scanOnStartup` | `true` | |
 | | `startupDelayMinutes` | `30` | `0` scans immediately. |
 | | `scanIntervalMinutes` | `360` | `0` disables periodic scans. |
@@ -282,11 +299,13 @@ Settings live in `%APPDATA%\PatchRadar\settings.json`. Use the Settings window, 
 | | `includeCategories` | all except Definition | Security, Cumulative, DotNet, ServicingStack, Driver, Office, Other. |
 | | `excludeTitleRegex` | Defender definition patterns | Titles matching are hidden. |
 | | `showFailed` | `false` | Show failed installs. |
+| | `showPending` | `true` | List updates Windows has found but not installed yet. |
 | severity | `criticalKeywords` | `[]` (built-ins) | See below. |
 | | `changePhrases` | `[]` (built-ins) | See below. |
 | | `treatBehaviourChangesAsIssues` | `true` | Turn off for "known issues only" behaviour. |
 | | `dimReviewed` | `true` | Dim reviewed rows in the menu. |
 | appearance | `theme` | `System` | `System`, `Light`, `Dark`. Follows the OS live. |
+| | `fontSize` | `0` | Text size for the menu and windows (8 to 24). `0` is the Windows default; windows apply it when opened. |
 | | `colors` | green `#2E9E5B`, orange `#E08A1E`, red `#D63A3A`, grey `#7A7F87` | |
 | appUpdate | `mode` | `Auto` | `Off`, `Notify`, `Auto`. |
 | | `channel` | `Stable` | `Stable` or `PreRelease`. |

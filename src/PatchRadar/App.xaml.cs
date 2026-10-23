@@ -43,6 +43,15 @@ public partial class App : Application
             return;
         }
 
+        // Headless report for scheduled tasks and RMM tools: PatchRadar.exe --report out.(json|csv|md) [--briefing]
+        var reportIdx = Array.IndexOf(args, "--report");
+        if (reportIdx >= 0 && reportIdx + 1 < args.Length)
+        {
+            var code = await RunReportAsync(args[reportIdx + 1], args.Contains("--briefing"));
+            Shutdown(code);
+            return;
+        }
+
         // Prints the Authenticode verdict for a file (used on a clean machine before enabling RequireSignatureOnStable).
         var verifyIdx = Array.IndexOf(args, "--verify");
         if (verifyIdx >= 0 && verifyIdx + 2 < args.Length)
@@ -104,7 +113,8 @@ public partial class App : Application
         };
 
         var state = new StateStore(Paths.StateFile, _log);
-        var scan = BuildScanService(host, _supportClient, _log, new ReviewStore(state, null, Paths.ReviewSnapshotDir));
+        var ignores = new IgnoreStore(state);
+        var scan = BuildScanService(host, _supportClient, _log, new ReviewStore(state, null, Paths.ReviewSnapshotDir), ignores);
         var toasts = new ToastTracker(state);
 
         var updater = new AppUpdater(() => host.Current.AppUpdate,
@@ -118,7 +128,7 @@ public partial class App : Application
 
         var uninstall = new UninstallService(new UninstallPlanner(new RegistryCbsPackageSource()), new UacRunner(), new WindowsPrivilegeInfo(),
             new UninstallAudit(Paths.UninstallAuditFile, _log), () => host.Current, () => scan.InstalledUpdates, _log);
-        tray = _tray = new TrayController(scan, host, toasts, new DigestStore(state), _updates, _log, uninstall);
+        tray = _tray = new TrayController(scan, host, toasts, new DigestStore(state), _updates, _log, uninstall, new PendingSeenStore(state), new RebootReminder(state));
         _tray.Start();
         _updates.Start();
 
@@ -170,7 +180,7 @@ public partial class App : Application
         }
     }
 
-    private static ScanService BuildScanService(SettingsHost host, ClientHolder support, ILog log, ReviewStore reviews)
+    private static ScanService BuildScanService(SettingsHost host, ClientHolder support, ILog log, ReviewStore reviews, IgnoreStore? ignores = null)
     {
         var s = host.Current;
         var gate = new RequestGate(s.Network.MaxConcurrent, TimeSpan.FromMilliseconds(500));
@@ -182,7 +192,38 @@ public partial class App : Application
         var webView = new WebViewSource(new WebView2Renderer(Paths.WebViewDir, log), gate, () => host.Current.Advanced.EnableWebView2Fallback, log);
         var fetcher = new KbFetcher(new IKbSource[] { source, webView, releaseHealth }, cache, log, enrichers: new IKbEnricher[] { releaseHealth });
         var history = new UpdateCollector(new IUpdateHistoryProvider[] { new WuaHistoryProvider(), new QfeProvider() }, log);
-        return new ScanService(history, fetcher, () => host.Current, log, reviews);
+        return new ScanService(history, fetcher, () => host.Current, log, reviews, new WuaPendingProvider(), ignores, new RegistryRestartDetector());
+    }
+
+    /// <summary>
+    /// Scans once with no UI and writes the result. Exit code: 0 nothing red, 1 a red update is pending,
+    /// 2 a red update is installed (none pending), 3 the scan failed.
+    /// </summary>
+    private static async Task<int> RunReportAsync(string path, bool briefing)
+    {
+        try
+        {
+            var log = NullLog.Instance;
+            var store = new SettingsStore(Paths.SettingsFile, log);
+            var host = new SettingsHost(store, store.Load());
+            using var client = new ClientHolder(n => SupportSiteSource.CreateClient(n), () => host.Current.Network);
+            var state = new StateStore(Paths.StateFile, log);
+            var scan = BuildScanService(host, client, log, new ReviewStore(state, null, Paths.ReviewSnapshotDir), new IgnoreStore(state));
+            var result = await scan.ScanAsync(force: false, progress: null, CancellationToken.None);
+
+            var rows = result.Pending.Concat(result.Rows).ToList();
+            var ext = Path.GetExtension(path).ToLowerInvariant();
+            var text = briefing
+                ? Export.Briefing.Render(result.Pending, result.RestartPending, DateTime.Now, Environment.MachineName)
+                : Export.Exporters.Render(ext switch { ".json" => Export.ExportFormat.Json, ".csv" => Export.ExportFormat.Csv, _ => Export.ExportFormat.Markdown }, rows);
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
+            await File.WriteAllTextAsync(path, text, new UTF8Encoding(ext == ".csv"));
+
+            if (result.Pending.Any(r => r.Severity == Severity.Red && !r.Ignored)) return 1;
+            if (result.Rows.Any(r => r.Severity == Severity.Red && !r.Ignored)) return 2;
+            return 0;
+        }
+        catch (Exception) { return 3; }
     }
 
     /// <summary>
@@ -207,6 +248,15 @@ public partial class App : Application
                 try { var r = await provider.GetAsync(default); L($"{name}: {r.Count} entries in {sw0.ElapsedMilliseconds} ms"); }
                 catch (Exception ex) { L($"{name}: FAILED {ex.GetType().Name}: {ex.Message}"); }
             }
+
+            var swp = Stopwatch.StartNew();
+            try
+            {
+                var pend = await new WuaPendingProvider().GetAsync(true, default);
+                L($"Pending: {pend.Count} updates in {swp.ElapsedMilliseconds} ms");
+                foreach (var u in pend) L($"  {u.Kb}  available {u.InstalledOn.LocalDateTime:yyyy-MM-dd}  {u.Category,-14} {u.Title}");
+            }
+            catch (Exception ex) { L($"Pending: FAILED {ex.GetType().Name}: {ex.Message}"); }
 
             var sw = Stopwatch.StartNew();
             var all = await history.GetAsync(default);
