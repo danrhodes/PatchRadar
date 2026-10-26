@@ -175,8 +175,14 @@ public partial class DetailWindow : Window
         }
 
         // Improvements, collapsed by default
-        var list = new StackPanel();
-        foreach (var imp in kb.Improvements) { var t = Highlighted(imp.Text, null); t.Margin = new Thickness(0, 0, 0, 6); list.Children.Add(t); }
+        var list = new StackPanel { Margin = new Thickness(4, 6, 0, 0) };
+        var groups = kb.Improvements.GroupBy(i => string.IsNullOrWhiteSpace(i.Category) ? "" : i.Category!.Trim()).ToList();
+        foreach (var g in groups)
+        {
+            if (g.Key.Length > 0 || groups.Count > 1)
+                list.Children.Add(Text(g.Key.Length > 0 ? g.Key : "Other", 12, FontWeights.SemiBold, Brushes.Gray, new Thickness(0, list.Children.Count == 0 ? 0 : 10, 0, 4)));
+            foreach (var imp in g) list.Children.Add(BulletRow(imp.Text));
+        }
         Body.Children.Add(new Expander
         {
             Header = new TextBlock { Text = $"Improvements ({kb.Improvements.Count})", FontSize = 14, FontWeight = FontWeights.SemiBold },
@@ -220,7 +226,7 @@ public partial class DetailWindow : Window
         return new Expander
         {
             Header = new TextBlock { Text = $"What changed since you reviewed it ({diff.Summary})", FontSize = 13, FontWeight = FontWeights.SemiBold },
-            Content = panel, IsExpanded = true, Margin = new Thickness(0, 8, 0, 0),
+            Content = panel, IsExpanded = false, Margin = new Thickness(0, 8, 0, 0),
         };
     }
 
@@ -349,7 +355,7 @@ public partial class DetailWindow : Window
 
         return new Expander
         {
-            Header = header, Content = body, IsExpanded = !resolved || fixMissing,
+            Header = header, Content = body, IsExpanded = false,
             Margin = new Thickness(0, 0, 0, 8),
         };
     }
@@ -378,6 +384,23 @@ public partial class DetailWindow : Window
     }
 
     /// <summary>Plain text with matched critical keywords in bold.</summary>
+    /// <summary>One list item: a bullet in its own column so wrapped lines hang under the text, not under the dot.</summary>
+    private Grid BulletRow(string text)
+    {
+        var grid = new Grid { Margin = new Thickness(0, 0, 0, 7) };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(16) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        var dot = Text("•", 12, null, Brushes.Gray, new Thickness(0));
+        var body = Highlighted(text, null);
+        body.Margin = new Thickness(0);
+        body.LineHeight = 18;
+        dot.LineHeight = 18;
+        Grid.SetColumn(body, 1);
+        grid.Children.Add(dot);
+        grid.Children.Add(body);
+        return grid;
+    }
+
     private TextBlock Highlighted(string text, Brush? fg)
     {
         var tb = Text("", 12, null, fg);
