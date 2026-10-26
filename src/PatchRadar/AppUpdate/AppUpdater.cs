@@ -106,11 +106,17 @@ public sealed class AppUpdater
             }
 
             var mode = manual && s.Mode == UpdateMode.Off ? UpdateMode.Notify : s.Mode;
-            if (manual && _running.IsDevBuild) mode = UpdateMode.Notify;
             var version = chosen.Version.ToString();
             var available = new UpdateOutcome(UpdateOutcomeKind.Available, version, chosen.HtmlUrl, $"Version {version} is available.");
 
             if (mode == UpdateMode.Notify) { _log.Info($"Update {version} available (notify mode)"); return Set(available); }
+
+            if (!_installer.IsPatchRadarExe)
+            {
+                // "dotnet run" hosts the app in dotnet.exe; never swap that.
+                _log.Warn($"Running as {_installer.InstalledPath}, not a PatchRadar exe; offering {version} as notify-only");
+                return Set(available);
+            }
 
             if (!_installer.CanWrite)
             {

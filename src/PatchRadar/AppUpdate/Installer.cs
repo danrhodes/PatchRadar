@@ -109,6 +109,9 @@ public sealed class UpdateInstaller(IInstallFileOps ops, PendingStore pending, s
     public string OldPath => installedExePath + ".old";
     public string FailedPath => installedExePath + ".failed";
 
+    /// <summary>False when hosted by another exe (dotnet.exe under "dotnet run"), which must never be replaced.</summary>
+    public bool IsPatchRadarExe => Path.GetFileName(installedExePath).StartsWith("PatchRadar", StringComparison.OrdinalIgnoreCase);
+
     public bool CanWrite => ops.IsDirectoryWritable(Path.GetDirectoryName(installedExePath)!);
 
     public ApplyResult Apply(string verifiedExe, AppVersion from, AppVersion to)

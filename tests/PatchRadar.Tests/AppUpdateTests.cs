@@ -626,14 +626,15 @@ public class AppUpdaterTests
     }
 
     [Fact]
-    public async Task DevBuild_IsNotCheckedAutomatically_AndNeverAutoApplies()
+    public async Task DevBuild_IsNotCheckedAutomatically_ButManualCheckInstalls()
     {
         using var rig = Rig(running: "1.0.0");
+        rig.Downloader.Serve(R);
         Assert.Equal(UpdateOutcomeKind.Disabled, (await rig.Updater.CheckAsync(false, default)).Kind);
         Assert.Equal(0, rig.Releases.Calls);
         var manual = await rig.Updater.CheckAsync(true, default);
-        Assert.Equal(UpdateOutcomeKind.Available, manual.Kind);
-        Assert.Equal("OLD-EXE", rig.InstalledText);
+        Assert.Equal(UpdateOutcomeKind.Applied, manual.Kind);
+        Assert.Equal("NEW-EXE", rig.InstalledText);
     }
 
     [Fact]
