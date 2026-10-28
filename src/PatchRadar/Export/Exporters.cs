@@ -39,7 +39,7 @@ public static class CsvExporter
             var cells = new[]
             {
                 r.Severity.ToString(), r.Update.HasKb ? r.Update.Kb : "", r.Update.Title, r.Update.Category.ToString(), Exporters.Date(r.Update.InstalledOn),
-                Exporters.Result(r), r.Kb?.OsBuild ?? "", string.Join("; ", r.Result.MatchedKeywords), r.KeywordHits.ToString(), string.Join("; ", r.FixesNotInstalled.Select(f => f.Kb).Distinct()), Exporters.Summary(r), UrlGuard.KbUrl(r.Update.Kb), r.Review.ToString(),
+                Exporters.Result(r), r.Kb?.OsBuild ?? "", string.Join("; ", r.Result.MatchedKeywords), r.KeywordHits.ToString(), string.Join("; ", r.FixesNotInstalled.Select(f => f.Kb).Distinct()), Exporters.Summary(r), UrlGuard.ArticleUrl(r), r.Review.ToString(),
             };
             sb.Append(string.Join(",", cells.Select(Escape))).Append("\r\n");
         }
@@ -67,7 +67,7 @@ public static class JsonExporter
         installed = r.Update.InstalledOn.ToString("o", CultureInfo.InvariantCulture),
         result = Exporters.Result(r),
         osBuild = r.Kb?.OsBuild,
-        url = UrlGuard.KbUrl(r.Update.Kb),
+        url = UrlGuard.ArticleUrl(r),
         matchedKeywords = r.Result.MatchedKeywords,
         summary = r.Result.Summary,
         behaviourChanges = r.Result.BehaviourChanges.Select(c => c.Text),
@@ -92,7 +92,7 @@ public static class MarkdownExporter
             var note = Exporters.Summary(r);
             if (r.Result.MatchedKeywords.Count > 0) note += (note.Length > 0 ? " " : "") + "(" + string.Join(", ", r.Result.MatchedKeywords) + ")";
             sb.Append("| ").Append(r.Severity)
-              .Append(" | ").Append(r.Update.HasKb ? $"[{r.Update.Kb}]({UrlGuard.KbUrl(r.Update.Kb)})" : "no KB")
+              .Append(" | ").Append(r.Update.HasKb ? $"[{r.Update.Kb}]({UrlGuard.ArticleUrl(r)})" : "no KB")
               .Append(" | ").Append(Exporters.Date(r.Update.InstalledOn))
               .Append(" | ").Append(Cell(r.Update.Title))
               .Append(" | ").Append(Cell(note)).AppendLine(" |");

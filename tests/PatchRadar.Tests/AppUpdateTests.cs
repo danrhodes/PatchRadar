@@ -150,6 +150,8 @@ public class UrlAllowlistTests
 
     [Theory]
     [InlineData("https://github.com/danrhodes/PatchRadar/releases/tag/v1.0.0", true)]
+    [InlineData("https://github.com/danrhodes/PatchRadar", true)]
+    [InlineData("https://github.com/danrhodes/PatchRadarEvil", false)]
     [InlineData("https://github.com/other/repo/releases/tag/v1.0.0", false)]
     [InlineData("http://github.com/danrhodes/PatchRadar/releases", false)]
     [InlineData("https://evil.example/danrhodes/PatchRadar/", false)]

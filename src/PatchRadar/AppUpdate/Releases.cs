@@ -41,7 +41,8 @@ public static class UpdateRepo
     public static bool IsAllowedReleasePage(string? url) =>
         Uri.TryCreate(url, UriKind.Absolute, out var u) && u.Scheme == Uri.UriSchemeHttps &&
         u.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase) &&
-        u.AbsolutePath.StartsWith($"/{Owner}/{Name}/", StringComparison.OrdinalIgnoreCase);
+        (u.AbsolutePath.Equals($"/{Owner}/{Name}", StringComparison.OrdinalIgnoreCase) ||
+         u.AbsolutePath.StartsWith($"/{Owner}/{Name}/", StringComparison.OrdinalIgnoreCase));
 }
 
 public sealed record ReleaseAsset(string Name, string Url, long Size);

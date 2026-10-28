@@ -104,6 +104,12 @@ public sealed class UpdateCoordinator : IDisposable
                 _toastedVersion = o.Version;
                 _toast("PatchRadar update ready", $"Version {o.Version} is downloaded and verified. Use the tray menu: Restart to update.", null);
                 break;
+            case UpdateOutcomeKind.Applied:
+                _toast("PatchRadar updating", o.Message ?? $"Updating to v{o.Version}. PatchRadar will restart.", null);
+                break;
+            case UpdateOutcomeKind.Failed when !manual:
+                _toast("PatchRadar update problem", o.Message ?? "A scheduled update could not be installed. See the log.", null);
+                break;
             case UpdateOutcomeKind.UpToDate when manual:
                 _toast("PatchRadar", "You are on the latest version.", null);
                 break;

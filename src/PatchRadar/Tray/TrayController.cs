@@ -403,13 +403,28 @@ public sealed class TrayController : IDisposable
             existing.Activate();
             return;
         }
-        var win = new DetailWindow(row, Settings.Appearance.Colors, RefreshRowAsync, SetReviewed, _scan.IsInstalled, _log, _uninstall, () => _ = RunScanAsync(force: true), SetIgnored);
+        var win = new DetailWindow(row, Settings.Appearance.Colors, RefreshRowAsync, SetReviewed, _scan.IsInstalled, _log, _uninstall, () => _ = RunScanAsync(force: true), SetIgnored, ShowDetailByKb);
         _details[row.Update.Kb] = win;
         win.Closed += (_, _) => _details.Remove(row.Update.Kb);
         UiScale.Apply(win, Settings.Appearance.FontSize);
         win.Show();
         win.Activate();
         win.Topmost = true; win.Topmost = false;
+    }
+
+    /// <summary>Open the PatchRadar info window for a KB (for example the update a servicing stack update came with).</summary>
+    private async void ShowDetailByKb(string kb)
+    {
+        try
+        {
+            var row = _last.Pending.Concat(_last.Rows).FirstOrDefault(r => r.Update.Kb.Equals(kb, StringComparison.OrdinalIgnoreCase));
+            if (row is null && _scan.InstalledUpdates.FirstOrDefault(u => u.Kb.Equals(kb, StringComparison.OrdinalIgnoreCase)) is { } installed)
+                row = await Task.Run(() => _scan.RefreshOneAsync(installed, CancellationToken.None));
+            if (row is not null) { ShowDetail(row); return; }
+            _log.Info($"{kb} is not in the update list; opening its Microsoft article instead");
+            UrlGuard.OpenInBrowser(UrlGuard.KbUrl(kb), _log);
+        }
+        catch (Exception ex) { _log.Error("Could not open " + kb, ex); }
     }
 
     private void ShowAllUpdates()
@@ -425,7 +440,7 @@ public sealed class TrayController : IDisposable
     private void ShowBriefing()
     {
         var md = Briefing.Render(_last.Pending, _restart, DateTime.Now, Environment.MachineName);
-        var briefing = new BriefingWindow(md, _log);
+        var briefing = new BriefingWindow(_last.Pending, _restart, Environment.MachineName, Settings.Appearance.Colors, md, ShowDetail, _log);
         UiScale.Apply(briefing, Settings.Appearance.FontSize);
         briefing.Show();
     }

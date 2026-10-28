@@ -33,6 +33,12 @@ public sealed record UpdateRow(InstalledUpdate Update, KbData? Kb, SeverityResul
     /// <summary>A fix is published but not installed here, and no newer cumulative update probably covers it.</summary>
     public bool FixAvailableNotInstalled => FixesNotInstalled.Count > 0;
 
+    /// <summary>The cumulative update whose article says it included this servicing stack update (null if unknown).</summary>
+    public string? SsuParentKb { get; init; }
+
+    /// <summary>A servicing stack update, by its title or because another article names it as the SSU it shipped with.</summary>
+    public bool IsServicingStack => Update.Category == UpdateCategory.ServicingStack || SsuParentKb is not null;
+
     /// <summary>Offered by Windows Update but not installed yet.</summary>
     public bool IsPending => Update.State == UpdateState.Pending;
 
@@ -80,6 +86,7 @@ public sealed class ScanService
     private readonly ReviewStore? _reviews;
     private volatile HashSet<string> _installed = new(StringComparer.OrdinalIgnoreCase);
     private volatile IReadOnlyList<InstalledUpdate> _installedList = Array.Empty<InstalledUpdate>();
+    private volatile IReadOnlyList<InstalledUpdate> _pendingList = Array.Empty<InstalledUpdate>();
 
     /// <summary>The installed updates from the last history read (for the uninstall planner and the digest).</summary>
     public IReadOnlyList<InstalledUpdate> InstalledUpdates => _installedList;
@@ -143,7 +150,9 @@ public sealed class ScanService
                 _log.Warn($"Online pending search failed ({ex.Message}); using the local store");
                 found = await _pending.GetAsync(false, ct).ConfigureAwait(false);
             }
-            return UpdateMerger.FilterPending(found, s.Updates, IsInstalled);
+            var filtered = UpdateMerger.FilterPending(found, s.Updates, IsInstalled);
+            _pendingList = filtered;
+            return filtered;
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex)
@@ -204,6 +213,7 @@ public sealed class ScanService
                                             x.Category is UpdateCategory.Cumulative or UpdateCategory.Security);
         return new UpdateRow(u, kb, engine.Evaluate(kb))
         {
+            SsuParentKb = FindSsuParent(u),
             Review = status,
             ReviewedUtc = reviews.ReviewedUtc(u.Kb),
             ChangeSinceReview = diff,
@@ -212,6 +222,21 @@ public sealed class ScanService
             Ignored = _ignores?.IsIgnored(u.Kb) == true,
             DriverNote = u.State == UpdateState.Pending ? DriverInfo.Compare(u, _installedList) : null,
         };
+    }
+
+    /// <summary>
+    /// Which update an SSU shipped with: look at the cached articles of cumulative/security updates installed or pending
+    /// around the same time (an SSU arrives with its cumulative update, so only nearby ones are read).
+    /// </summary>
+    private string? FindSsuParent(InstalledUpdate u)
+    {
+        // Not Security/Cumulative: an SSU is often titled "Security Update (KB…)", so those must still be checked.
+        if (u.Category is UpdateCategory.Definition or UpdateCategory.Driver or UpdateCategory.Office) return null;
+        var near = _installedList.Concat(_pendingList)
+            .Where(x => x.Kb != u.Kb && x.HasKb && (x.Category is UpdateCategory.Cumulative or UpdateCategory.Security or UpdateCategory.Other) &&
+                        Math.Abs((x.InstalledOn - u.InstalledOn).TotalDays) <= 10)
+            .Select(x => x.Kb).Distinct(StringComparer.OrdinalIgnoreCase).Take(12);
+        return ServicingStackLinker.ParentOf(u.Kb, near.Select(k => (k, _fetcher.GetCached(k) is { Status: KbStatus.Ok } d ? d.RawText : null)));
     }
 
     /// <summary>Ignore or stop ignoring one update and return the updated row.</summary>

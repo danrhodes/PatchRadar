@@ -65,8 +65,16 @@ public static class KbParser
         }
 
         var impHead = improvementsHead ?? summaryHead;
-        if (impHead is not null) data.Improvements = ParseImprovements(SectionNodes(impHead));
+        if (impHead is not null)
+        {
+            var impNodes = SectionNodes(impHead);
+            data.Improvements = ParseImprovements(impNodes);
+            data.IncludedUpdates = ParseIncluded(impNodes);
+        }
         else data.Improvements = ParseFreeText(root);
+
+        if (FindHeading(root, h => h.StartsWith("components updates", StringComparison.OrdinalIgnoreCase)) is { } compHead)
+            data.Components = ParseComponents(SectionNodes(compHead));
 
         if (knownHead is not null) data.KnownIssues = ParseKnownIssues(SectionNodes(knownHead));
 
@@ -133,6 +141,36 @@ public static class KbParser
             if (m.Success) { imp.Category = StripSuffixTags(m.Groups["t"].Value); imp.Text = text; }
             else imp.Text = text;
             list.Add(imp);
+        }
+        return list;
+    }
+
+    private static readonly Regex KbNumber = new(@"KB(\d{6,8})", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>The bare-link list under "includes improvements from the following previously released updates".</summary>
+    private static List<KbPriorUpdate> ParseIncluded(List<HtmlNode> nodes)
+    {
+        var list = new List<KbPriorUpdate>();
+        foreach (var li in nodes.SelectMany(n => n.Name == "li" ? new[] { n } : n.Descendants("li")))
+        {
+            var text = Clean(Text(li));
+            var links = li.Descendants("a").ToList();
+            if (text.Length < 4 || links.Count != 1 || Clean(Text(links[0])) != text) continue;
+            var m = KbNumber.Match(text);
+            list.Add(new KbPriorUpdate { Text = text, Kb = m.Success ? "KB" + m.Groups[1].Value : null });
+        }
+        return list;
+    }
+
+    /// <summary>"Components updates": one collapsible entry per component (summary = name, body = what it includes).</summary>
+    private static List<KbComponent> ParseComponents(List<HtmlNode> nodes)
+    {
+        var list = new List<KbComponent>();
+        foreach (var det in nodes.SelectMany(n => n.Name == "details" ? new[] { n } : n.Descendants("details")))
+        {
+            var name = Clean(Text(det.Element("summary")));
+            var body = Clean(string.Join(" ", det.ChildNodes.Where(c => c.NodeType == HtmlNodeType.Element && c.Name != "summary").Select(Text)));
+            if (name.Length > 0 && body.Length > 0) list.Add(new KbComponent { Name = name, Text = body });
         }
         return list;
     }

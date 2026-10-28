@@ -48,7 +48,7 @@ public sealed class AboutWindow : Window
         var b = new Button { Content = text, Padding = new Thickness(12, 3, 12, 3), Margin = new Thickness(0, 0, 8, 0) };
         b.Click += (_, _) =>
         {
-            if (!UpdateRepo.IsAllowedReleasePage(url)) return;
+            if (!UpdateRepo.IsAllowedReleasePage(url)) { log.Warn("Refused to open link: " + url); return; }
             try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
             catch (Exception ex) { log.Error("Could not open link", ex); }
         };

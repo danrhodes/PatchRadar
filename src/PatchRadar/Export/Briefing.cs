@@ -46,14 +46,14 @@ public static class Briefing
         return sb.ToString();
     }
 
-    private static int Rank(UpdateRow r) => r.Severity switch { Severity.Red => 0, Severity.Orange => 1, Severity.Grey => 2, _ => 3 };
+    public static int Rank(UpdateRow r) => r.Severity switch { Severity.Red => 0, Severity.Orange => 1, Severity.Grey => 2, _ => 3 };
 
-    private static string Label(Severity s) => s switch
+    public static string Label(Severity s) => s switch
     {
         Severity.Red => "risky", Severity.Orange => "to read", Severity.Grey => "unknown", _ => "no known problems",
     };
 
-    private static string Name(UpdateRow r) => r.Update.HasKb ? $"{r.Update.Kb} – {r.Update.Title}" : r.Update.Title;
+    public static string Name(UpdateRow r) => r.Update.HasKb ? $"{r.Update.Kb} – {r.Update.Title}" : r.Update.Title;
 
     private static void AppendUpdate(StringBuilder sb, UpdateRow r)
     {

@@ -62,17 +62,44 @@ public partial class App : Application
             return;
         }
 
-        // After a self-update the old process may still be exiting.
-        var postUpdate = args.Contains("--post-update");
-        var wait = postUpdate ? TimeSpan.FromSeconds(10) : TimeSpan.Zero;
-        _single = new SingleInstance(wait: wait);
-        if (!_single.IsFirst) { Shutdown(); return; }
-
+        // Logging and crash handlers first, so every early exit below leaves a trace.
         _log = new FileLog(FileLog.DefaultDirectory);
         DispatcherUnhandledException += (_, ex) => { _log.Error("Unhandled UI exception", ex.Exception); ex.Handled = true; };
-        AppDomain.CurrentDomain.UnhandledException += (_, ex) => _log.Error("Unhandled exception", ex.ExceptionObject as Exception);
+        AppDomain.CurrentDomain.UnhandledException += (_, ex) => _log.Error($"Unhandled exception (terminating={ex.IsTerminating})", ex.ExceptionObject as Exception);
         TaskScheduler.UnobservedTaskException += (_, ex) => { _log.Error("Unobserved task exception", ex.Exception); ex.SetObserved(); };
 
+        // After a self-update the old process may still be exiting; give it time to release the mutex.
+        var postUpdate = args.Contains("--post-update");
+        var wait = postUpdate ? TimeSpan.FromSeconds(30) : TimeSpan.Zero;
+        try { _single = new SingleInstance(wait: wait); }
+        catch (Exception ex)
+        {
+            // Mutex could not be opened (for example owned by an elevated or other-session instance): carry on rather than die silently.
+            _log.Error("Single-instance check failed; starting anyway", ex);
+        }
+        if (_single is { IsFirst: false })
+        {
+            _log.Warn($"Another PatchRadar instance is already running; exiting (args: {string.Join(' ', args)})");
+            if (!postUpdate)
+                MessageBox.Show("PatchRadar is already running. Look for its icon in the system tray (click the ^ arrow if it is hidden).",
+                    "PatchRadar", MessageBoxButton.OK, MessageBoxImage.Information);
+            Shutdown();
+            return;
+        }
+
+        try { StartUp(); }
+        catch (Exception ex)
+        {
+            _log.Error("Startup failed", ex);
+            MessageBox.Show("PatchRadar could not start. Details were written to " + FileLog.DefaultDirectory + "\n\n" + ex.Message,
+                "PatchRadar", MessageBoxButton.OK, MessageBoxImage.Error);
+            Shutdown(1);
+        }
+    }
+
+    private void StartUp()
+    {
+        _log ??= new FileLog(FileLog.DefaultDirectory);   // already set by OnStartup; lets the compiler see it is non-null
         var store = new SettingsStore(Paths.SettingsFile, _log);
         var host = new SettingsHost(store, store.Load());
         ApplyRuntimeSettings(host.Current);
@@ -324,7 +351,7 @@ public partial class App : Application
         _githubClient?.Dispose();
         _downloadClient?.Dispose();
         _single?.Dispose();
-        _log?.Info("PatchRadar exiting");
+        _log?.Info($"PatchRadar exiting (code {e.ApplicationExitCode})");
         base.OnExit(e);
     }
 }

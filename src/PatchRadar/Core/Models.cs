@@ -73,6 +73,10 @@ public sealed class KbData
     public string? AppliesTo { get; set; }
     public List<KbImprovement> Improvements { get; set; } = new();
     public List<KbIssue> KnownIssues { get; set; } = new();
+    /// <summary>Earlier updates whose improvements this one includes. Not part of the content hash.</summary>
+    public List<KbPriorUpdate> IncludedUpdates { get; set; } = new();
+    /// <summary>The "Components updates" section. Not part of the content hash.</summary>
+    public List<KbComponent> Components { get; set; } = new();
     public string RawText { get; set; } = "";
     public string ContentHash { get; set; } = "";
     public string? LastError { get; set; }
@@ -93,4 +97,18 @@ public sealed class SeverityResult
     public IReadOnlyList<KbImprovement> BehaviourChanges { get; init; } = Array.Empty<KbImprovement>();
     public IReadOnlyList<KbIssue> ActiveIssues { get; init; } = Array.Empty<KbIssue>();
     public string? Summary { get; init; }
+}
+
+/// <summary>An earlier update this article says it includes ("September 8, 2026-KB5124008 (OS Builds ...)").</summary>
+public sealed class KbPriorUpdate
+{
+    public string Text { get; set; } = "";
+    public string? Kb { get; set; }
+}
+
+/// <summary>One entry under "Components updates" (for example the servicing stack update or AI components).</summary>
+public sealed class KbComponent
+{
+    public string Name { get; set; } = "";
+    public string Text { get; set; } = "";
 }

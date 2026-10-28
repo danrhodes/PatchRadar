@@ -31,6 +31,35 @@ public static class UrlGuard
     public static string KbUrl(string kb) =>
         kb.StartsWith("KB", StringComparison.OrdinalIgnoreCase) ? $"https://support.microsoft.com/help/{kb.Trim().ToUpperInvariant().Replace("KB", "")}" : "";
 
+    /// <summary>Microsoft's page listing Defender antivirus platform, engine and security intelligence releases.</summary>
+    public const string DefenderUpdatesUrl = "https://learn.microsoft.com/en-us/defender-endpoint/microsoft-defender-antivirus-updates";
+
+    private static readonly System.Text.RegularExpressions.Regex DefenderTitle = new(
+        @"Security Intelligence|Defender Antivirus|(Microsoft|Windows) Defender|Antimalware (platform|client)",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    public static bool IsDefenderUpdate(InstalledUpdate u) => DefenderTitle.IsMatch(u.Title);
+
+    /// <summary>Defender definition/platform updates often have a KB number whose support page 404s: Microsoft documents them on one page instead.</summary>
+    public static bool UseDefenderPage(UpdateRow row) =>
+        row.Update.HasKb && row.Kb?.Status == KbStatus.NotFound && IsDefenderUpdate(row.Update);
+
+    /// <summary>Microsoft's explanation of servicing stack updates.</summary>
+    public const string ServicingStackUrl = "https://learn.microsoft.com/en-gb/windows/deployment/update/servicing-stack-updates";
+
+    /// <summary>
+    /// A servicing stack update whose own article is missing (404): send the user to the update it shipped with, whose
+    /// article describes it, or to Microsoft's servicing stack page when that update is unknown.
+    /// </summary>
+    public static bool UseSsuFallback(UpdateRow row) =>
+        row.Update.HasKb && row.IsServicingStack && row.Kb?.Status == KbStatus.NotFound;
+
+    /// <summary>Where "open the article" should go for this update.</summary>
+    public static string ArticleUrl(UpdateRow row) =>
+        UseDefenderPage(row) ? DefenderUpdatesUrl
+        : UseSsuFallback(row) ? (row.SsuParentKb is { } parent ? KbUrl(parent) : ServicingStackUrl)
+        : KbUrl(row.Update.Kb);
+
     /// <summary>Only https links on Microsoft hosts may be opened.</summary>
     public static bool IsSafe(string? url)
     {
@@ -80,7 +109,7 @@ public static class SummaryFormatter
         }
         if (row.Kb is null || row.Kb.Status != KbStatus.Ok)
             sb.AppendLine().AppendLine(u.HasKb ? "KB data unavailable: " + (row.Kb?.LastError ?? "not fetched yet") : "No KB article is published for this update.");
-        if (u.HasKb) sb.AppendLine().AppendLine(UrlGuard.KbUrl(u.Kb));
+        if (u.HasKb) sb.AppendLine().AppendLine(UrlGuard.ArticleUrl(row));
         return sb.ToString();
     }
 

@@ -22,6 +22,7 @@ public partial class DetailWindow : Window
     private readonly Func<string, bool> _isInstalled;
     private readonly Func<UpdateRow, bool, UpdateRow>? _setIgnored;
     private readonly UninstallService? _uninstall;
+    private readonly Action<string>? _openKb;
     private readonly Action? _onUninstalled;
     private UninstallPlan? _plan;
     private readonly ColorSettings _colors;
@@ -30,10 +31,11 @@ public partial class DetailWindow : Window
 
     public DetailWindow(UpdateRow row, ColorSettings colors, Func<UpdateRow, Task<UpdateRow?>> refresh,
         Func<UpdateRow, bool, UpdateRow> setReviewed, Func<string, bool> isInstalled, ILog log,
-        UninstallService? uninstall = null, Action? onUninstalled = null, Func<UpdateRow, bool, UpdateRow>? setIgnored = null)
+        UninstallService? uninstall = null, Action? onUninstalled = null, Func<UpdateRow, bool, UpdateRow>? setIgnored = null, Action<string>? openKb = null)
     {
         InitializeComponent();
         _setIgnored = setIgnored;
+        _openKb = openKb;
         _row = row;
         _colors = colors;
         _refresh = refresh;
@@ -74,12 +76,17 @@ public partial class DetailWindow : Window
 
         Body.Children.Add(Text(u.Label, 18, FontWeights.Bold));
         OpenButton.Visibility = u.HasKb ? Visibility.Visible : Visibility.Collapsed;
+        OpenButton.Content = UrlGuard.UseDefenderPage(_row) ? "Open Defender update info"
+            : UrlGuard.UseSsuFallback(_row) ? (_row.SsuParentKb is { } p ? (_openKb is null ? $"Open {p} article" : $"Open {p} details") : "Open servicing stack info")
+            : "Open KB article";
         Body.Children.Add(Text(u.Title, 12, null));
         var meta = _row.IsPending
             ? $"Pending: not installed yet · offered since {u.InstalledOn.LocalDateTime:d MMM yyyy}"
             : $"Installed {u.InstalledOn.LocalDateTime:d MMM yyyy HH:mm} · {u.State}";
         if (_row.Kb?.OsBuild is { } build) meta += $" · OS build {build}";
         Body.Children.Add(Text(meta, 11, null, Brushes.Gray));
+        if (_row.IsServicingStack) Body.Children.Add(ServicingStackNote());
+        if (UrlGuard.UseDefenderPage(_row)) Body.Children.Add(DefenderNote());
         if (_row.FailureText is { } failure)
             Body.Children.Add(Text("Why it failed: " + failure, 12, null, SeverityBrush(Severity.Red)));
         if (_row.DriverNote is { } driver)
@@ -140,6 +147,11 @@ public partial class DetailWindow : Window
             Body.Children.Add(Text("Microsoft publishes no KB article for this update (this is normal for drivers), so PatchRadar has no known issues to show. It is waiting to be installed.", 12));
             return;
         }
+        // A servicing stack update has no article of its own: the note above already says which update it came with,
+        // so do not show a "No KB article (HTTP 404)" error for it.
+        if (_row.IsServicingStack && kb?.Status == KbStatus.NotFound) return;
+        // Same for Defender updates: the note above points at Microsoft's Defender updates page.
+        if (UrlGuard.UseDefenderPage(_row)) return;
         if (kb is null || kb.Status != KbStatus.Ok)
         {
             Body.Children.Add(Heading(kb?.Status == KbStatus.NotFound ? "No KB article" : "KB data unavailable"));
@@ -189,6 +201,56 @@ public partial class DetailWindow : Window
             Margin = new Thickness(0, 14, 0, 0), IsExpanded = false, Content = list,
         });
 
+        // Earlier updates this one rolls up, each linked to its own article.
+        if (kb.IncludedUpdates.Count > 0)
+        {
+            var prior = new StackPanel { Margin = new Thickness(4, 6, 0, 0) };
+            foreach (var inc in kb.IncludedUpdates)
+            {
+                var line = Text("", 12, null, null, new Thickness(0, 0, 0, 7));
+                line.Inlines.Add(new Run("• "));
+                if (inc.Kb is not null && inc.Text.Contains(inc.Kb, StringComparison.OrdinalIgnoreCase))
+                {
+                    var at = inc.Text.IndexOf(inc.Kb, StringComparison.OrdinalIgnoreCase);
+                    line.Inlines.Add(new Run(inc.Text[..at]));
+                    line.Inlines.Add(KbLink(inc.Kb));
+                    line.Inlines.Add(new Run(inc.Text[(at + inc.Kb.Length)..]));
+                }
+                else line.Inlines.Add(new Run(inc.Text));
+                prior.Children.Add(line);
+            }
+            Body.Children.Add(new Expander
+            {
+                Header = new TextBlock { Text = $"Includes improvements from earlier updates ({kb.IncludedUpdates.Count})", FontSize = 14, FontWeight = FontWeights.SemiBold },
+                Margin = new Thickness(0, 10, 0, 0), IsExpanded = false, Content = prior,
+            });
+        }
+
+        // Components updates: the servicing stack update, AI components and so on.
+        if (kb.Components.Count > 0)
+        {
+            var comps = new StackPanel { Margin = new Thickness(4, 6, 0, 0) };
+            foreach (var c in kb.Components)
+            {
+                comps.Children.Add(Text(c.Name, 12, FontWeights.SemiBold, null, new Thickness(0, comps.Children.Count == 0 ? 0 : 10, 0, 2)));
+                var body = Text("", 12);
+                var m = Regex.Match(c.Text, @"KB\d{6,8}", RegexOptions.IgnoreCase);
+                if (m.Success)
+                {
+                    body.Inlines.Add(new Run(c.Text[..m.Index]));
+                    body.Inlines.Add(KbLink(m.Value.ToUpperInvariant()));
+                    body.Inlines.Add(new Run(c.Text[(m.Index + m.Length)..]));
+                }
+                else body.Inlines.Add(new Run(c.Text));
+                comps.Children.Add(body);
+            }
+            Body.Children.Add(new Expander
+            {
+                Header = new TextBlock { Text = $"Components updates ({kb.Components.Count})", FontSize = 14, FontWeight = FontWeights.SemiBold },
+                Margin = new Thickness(0, 10, 0, 0), IsExpanded = false, Content = comps,
+            });
+        }
+
         if (kb.Structure == KbStructure.Unknown)
             Body.Children.Add(Text("This page has no recognised KB structure; text was scanned for keywords only.", 11, null, Brushes.Gray, new Thickness(0, 10, 0, 0)));
         if (!string.IsNullOrWhiteSpace(kb.Notice))
@@ -197,6 +259,52 @@ public partial class DetailWindow : Window
     }
 
 
+
+    /// <summary>Defender definition/platform updates have no KB page of their own: point at Microsoft's Defender updates page.</summary>
+    private Border DefenderNote()
+    {
+        var t = Text("", 12, null, null, new Thickness(0));
+        t.Inlines.Add(new Run("Microsoft Defender update") { FontWeight = FontWeights.SemiBold });
+        t.Inlines.Add(new Run(": Microsoft lists Defender platform, engine and security intelligence releases on one page. "));
+        var link = new Hyperlink(new Run("Microsoft Defender Antivirus updates")) { ToolTip = UrlGuard.DefenderUpdatesUrl };
+        link.Click += (_, _) => UrlGuard.OpenInBrowser(UrlGuard.DefenderUpdatesUrl, _log);
+        t.Inlines.Add(link);
+        return new Border
+        {
+            Background = new SolidColorBrush(Color.FromArgb(40, 128, 128, 128)),
+            BorderBrush = SeverityBrush(Severity.Grey), BorderThickness = new Thickness(2, 0, 0, 0),
+            Padding = new Thickness(8, 4, 8, 4), Margin = new Thickness(0, 8, 0, 0), Child = t,
+        };
+    }
+
+    /// <summary>"Servicing stack update: came with KBxxxx", with links to that update and to Microsoft's explanation.</summary>
+    private Border ServicingStackNote()
+    {
+        var t = Text("", 12, null, null, new Thickness(0));
+        t.Inlines.Add(new Run("Servicing stack update") { FontWeight = FontWeights.SemiBold });
+        t.Inlines.Add(new Run(": it improves how Windows installs updates. "));
+        if (_row.SsuParentKb is { } parent)
+        {
+            t.Inlines.Add(new Run("It came with "));
+            if (_openKb is { } open)
+            {
+                var inApp = new Hyperlink(new Run(parent)) { ToolTip = $"Open {parent} in PatchRadar" };
+                inApp.Click += (_, _) => open(parent);
+                t.Inlines.Add(inApp);
+            }
+            else t.Inlines.Add(KbLink(parent));
+            t.Inlines.Add(new Run(". "));
+        }
+        var more = new Hyperlink(new Run("About servicing stack updates")) { ToolTip = UrlGuard.ServicingStackUrl };
+        more.Click += (_, _) => UrlGuard.OpenInBrowser(UrlGuard.ServicingStackUrl, _log);
+        t.Inlines.Add(more);
+        return new Border
+        {
+            Background = new SolidColorBrush(Color.FromArgb(40, 128, 128, 128)),
+            BorderBrush = SeverityBrush(Severity.Grey), BorderThickness = new Thickness(2, 0, 0, 0),
+            Padding = new Thickness(8, 4, 8, 4), Margin = new Thickness(0, 8, 0, 0), Child = t,
+        };
+    }
 
     // ---- before and after ------------------------------------------------------------------------
 
@@ -464,7 +572,12 @@ public partial class DetailWindow : Window
         catch (Exception ex) { _log.Error("Ignore failed", ex); }
     }
 
-    private void Open_Click(object sender, RoutedEventArgs e) => UrlGuard.OpenInBrowser(UrlGuard.KbUrl(_row.Update.Kb), _log);
+    private void Open_Click(object sender, RoutedEventArgs e)
+    {
+        // An SSU with no article of its own opens the update it came with, inside PatchRadar.
+        if (UrlGuard.UseSsuFallback(_row) && _row.SsuParentKb is { } parent && _openKb is not null) { _openKb(parent); return; }
+        UrlGuard.OpenInBrowser(UrlGuard.ArticleUrl(_row), _log);
+    }
 
     private void Copy_Click(object sender, RoutedEventArgs e)
     {
