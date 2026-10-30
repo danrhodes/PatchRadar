@@ -198,7 +198,10 @@ public sealed class WebView2Renderer : IPageRenderer
 
     private static async Task WaitAsync(Task task, TimeSpan timeout, CancellationToken ct)
     {
-        var done = await Task.WhenAny(task, Task.Delay(timeout, ct)).ConfigureAwait(true);
+        // Cancel the timeout timer as soon as the page has loaded instead of leaving it running.
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var done = await Task.WhenAny(task, Task.Delay(timeout, stop.Token)).ConfigureAwait(true);
+        stop.Cancel();
         ct.ThrowIfCancellationRequested();
         if (done != task) throw new TimeoutException("Page did not finish loading in " + timeout.TotalSeconds + " s");
     }

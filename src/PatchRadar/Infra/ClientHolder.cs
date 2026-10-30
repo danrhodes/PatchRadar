@@ -16,10 +16,16 @@ public sealed class ClientHolder(Func<NetworkSettings, HttpClient> factory, Func
         lock (_lock) return _client ??= factory(settings());
     }
 
-    /// <summary>Drop the current client. In-flight requests finish on the old one; it is not disposed under them.</summary>
+    /// <summary>
+    /// Drop the current client. In-flight requests finish on the old one, so it is disposed later rather than under them
+    /// (every request is bounded by a timeout, so a few minutes is plenty); otherwise each settings change would leak a handler.
+    /// </summary>
     public void Reset()
     {
-        lock (_lock) _client = null;
+        HttpClient? old;
+        lock (_lock) { old = _client; _client = null; }
+        if (old is not null)
+            _ = Task.Delay(TimeSpan.FromMinutes(10)).ContinueWith(_ => { try { old.Dispose(); } catch { } });
     }
 
     public void Dispose()

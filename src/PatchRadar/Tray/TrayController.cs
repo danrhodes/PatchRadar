@@ -50,8 +50,12 @@ public sealed class TrayController : IDisposable
 
     private Severity IconSeverity() => _scanning ? Severity.Grey : _last.Worst(Settings.Updates.MenuItemCount);
 
-    private void UpdateIcon() =>
-        _icon.Icon = IconFactory.For(IconSeverity(), Settings.General.ShowIconBadge ? UnseenCount : 0);
+    private void UpdateIcon()
+    {
+        // An icon problem must never take the app down: keep the current icon and carry on.
+        try { _icon.Icon = IconFactory.For(IconSeverity(), Settings.General.ShowIconBadge ? UnseenCount : 0); }
+        catch (Exception ex) { _log.Warn("Could not update the tray icon: " + ex.Message); }
+    }
 
     /// <summary>Opening the menu is the user looking: record it and drop the badge.</summary>
     private void OnMenuOpened()
@@ -372,8 +376,9 @@ public sealed class TrayController : IDisposable
     private void OpenReleasePage(string url)
     {
         if (!UpdateRepo.IsAllowedReleasePage(url)) { _log.Warn("Refused to open release page: " + url); return; }
-        try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
-        catch (Exception ex) { _log.Error("Could not open the release page", ex); }
+        if (UrlGuard.Launch(url, _log)) return;
+        _log.Error("Could not open the release page", new InvalidOperationException(url));
+        UrlGuard.ShowLinkFallback(url);
     }
 
     private string NextText() =>

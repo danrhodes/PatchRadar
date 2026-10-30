@@ -194,7 +194,7 @@ public sealed class ReleaseHealthSource : IKbSource, IKbEnricher
         var id = kb.ToUpperInvariant();
         var matches = await IssuesForAsync(id, ct).ConfigureAwait(false);
         if (matches.Count == 0)
-            return new KbData { Kb = id, Source = Name, FetchedUtc = _now(), Status = KbStatus.Failed, LastError = "Release health lists no issues for this update" };
+            return new KbData { Kb = id, Source = Name, FetchedUtc = _now(), Status = KbStatus.Failed, LastError = "Not mentioned on the Windows release health page (that page only lists updates with known issues, so this is normal)" };
 
         var d = new KbData
         {

@@ -20,11 +20,24 @@ public sealed class KbCache
 
     private string PathFor(string kb) => Path.Combine(_dir, kb.ToUpperInvariant() + ".json");
 
+    // Parsed articles are large and every row asks for several of them, so keep them in memory.
+    // An entry is only trusted while the file's timestamp is unchanged, so edits made outside this instance still show up.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime Stamp, KbData Data)> _memory = new();
+
     public KbData? Load(string kb)
     {
         var p = PathFor(kb);
-        if (!File.Exists(p)) return null;
-        try { return JsonSerializer.Deserialize<KbData>(File.ReadAllText(p), SettingsStore.JsonOptions); }
+        var key = kb.ToUpperInvariant();
+        try
+        {
+            var info = new FileInfo(p);
+            if (!info.Exists) { _memory.TryRemove(key, out _); return null; }
+            var stamp = info.LastWriteTimeUtc;
+            if (_memory.TryGetValue(key, out var hit) && hit.Stamp == stamp) return hit.Data;
+            var data = JsonSerializer.Deserialize<KbData>(File.ReadAllText(p), SettingsStore.JsonOptions);
+            if (data is not null) _memory[key] = (stamp, data);
+            return data;
+        }
         catch (Exception ex) when (ex is JsonException or IOException)
         {
             _log.Warn($"Cache for {kb} unreadable: {ex.Message}");
@@ -51,6 +64,7 @@ public sealed class KbCache
         var tmp = p + ".tmp";
         File.WriteAllText(tmp, JsonSerializer.Serialize(data, SettingsStore.JsonOptions));
         if (File.Exists(p)) File.Replace(tmp, p, null); else File.Move(tmp, p);
+        _memory[data.Kb.ToUpperInvariant()] = (new FileInfo(p).LastWriteTimeUtc, data);
     }
 
     /// <summary>Retry delay after N consecutive failures: 1 h, 6 h, then 24 h.</summary>

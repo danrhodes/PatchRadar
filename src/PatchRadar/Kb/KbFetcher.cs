@@ -98,24 +98,64 @@ public sealed class SupportSiteSource : IKbSource
         return c;
     }
 
+    private static readonly TimeSpan MaxRetryAfter = TimeSpan.FromSeconds(30);
+
+    private const string EdgeUserAgent =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0";
+    private const string FirefoxUserAgent =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:131.0) Gecko/20100101 Firefox/131.0";
+
+    /// <summary>
+    /// Ways of asking for the same article, tried in turn when the site answers 403 / 429 (bot filtering, rate limiting):
+    /// the plain request, then a full browser-like navigation to the en-us page, then the en-gb page as Firefox.
+    /// </summary>
+    private static readonly (string Path, string? UserAgent, bool BrowserHeaders)[] Variants =
+    {
+        ("help/", null, false),
+        ("en-us/help/", EdgeUserAgent, true),
+        ("en-gb/help/", FirefoxUserAgent, true),
+    };
+
+    private static HttpRequestMessage BuildRequest(string url, (string Path, string? UserAgent, bool BrowserHeaders) v)
+    {
+        var req = new HttpRequestMessage(HttpMethod.Get, url);
+        if (v.UserAgent is not null) { req.Headers.UserAgent.Clear(); req.Headers.UserAgent.ParseAdd(v.UserAgent); }
+        if (v.BrowserHeaders)
+        {
+            req.Headers.Accept.Clear();
+            req.Headers.Accept.ParseAdd("text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8");
+            req.Headers.Referrer = new Uri("https://support.microsoft.com/");
+            req.Headers.TryAddWithoutValidation("Upgrade-Insecure-Requests", "1");
+            req.Headers.TryAddWithoutValidation("Sec-Fetch-Dest", "document");
+            req.Headers.TryAddWithoutValidation("Sec-Fetch-Mode", "navigate");
+            req.Headers.TryAddWithoutValidation("Sec-Fetch-Site", "same-origin");
+        }
+        return req;
+    }
+
     public async Task<KbData> FetchAsync(string kb, CancellationToken ct)
     {
         var number = kb.StartsWith("KB", StringComparison.OrdinalIgnoreCase) ? kb[2..] : kb;
-        var url = $"https://support.microsoft.com/help/{number}";
         string? lastError = null;
         var status = KbStatus.Failed;
+        var variant = 0;      // moves to the next way of asking each time the site answers 403 / 429
+        TimeSpan? retryAfter = null;
 
         for (var attempt = 1; attempt <= _maxAttempts; attempt++)
         {
             ct.ThrowIfCancellationRequested();
             try
             {
-                var (code, body, finalUrl) = await _gate.RunAsync(async () =>
+                var v = Variants[Math.Min(variant, Variants.Length - 1)];
+                var url = $"https://support.microsoft.com/{v.Path}{number}";
+                var (code, body, finalUrl, serverWait) = await _gate.RunAsync(async () =>
                 {
-                    using var resp = await _http().GetAsync(url, ct).ConfigureAwait(false);
+                    using var req = BuildRequest(url, v);
+                    using var resp = await _http().SendAsync(req, ct).ConfigureAwait(false);
                     var text = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-                    return (resp.StatusCode, text, resp.RequestMessage?.RequestUri?.ToString());
+                    return (resp.StatusCode, text, resp.RequestMessage?.RequestUri?.ToString(), resp.Headers.RetryAfter?.Delta);
                 }, ct).ConfigureAwait(false);
+                retryAfter = serverWait;
 
                 if (code == HttpStatusCode.OK)
                 {
@@ -132,6 +172,7 @@ public sealed class SupportSiteSource : IKbSource
                 status = code is HttpStatusCode.Forbidden or HttpStatusCode.TooManyRequests ? KbStatus.Blocked : KbStatus.Failed;
                 var retryable = code is HttpStatusCode.Forbidden or HttpStatusCode.TooManyRequests || (int)code >= 500;
                 if (!retryable) break;
+                if (status == KbStatus.Blocked) variant++;
             }
             catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
             {
@@ -142,7 +183,9 @@ public sealed class SupportSiteSource : IKbSource
             if (attempt < _maxAttempts)
             {
                 var backoff = TimeSpan.FromSeconds(Math.Pow(2, attempt)); // 2 s, 4 s, ...
-                _log.Info($"{kb}: {lastError}; retrying in {backoff.TotalSeconds:0}s");
+                // Honour the server's own Retry-After, within reason.
+                if (retryAfter is { } ra && ra > backoff) backoff = ra < MaxRetryAfter ? ra : MaxRetryAfter;
+                _log.Info($"{kb}: {lastError}; retrying in {backoff.TotalSeconds:0}s" + (status == KbStatus.Blocked ? " with a different request style" : ""));
                 await _delay(backoff, ct).ConfigureAwait(false);
             }
         }

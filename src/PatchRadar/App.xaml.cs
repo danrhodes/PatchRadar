@@ -65,11 +65,15 @@ public partial class App : Application
         // Logging and crash handlers first, so every early exit below leaves a trace.
         _log = new FileLog(FileLog.DefaultDirectory);
         DispatcherUnhandledException += (_, ex) => { _log.Error("Unhandled UI exception", ex.Exception); ex.Handled = true; };
-        AppDomain.CurrentDomain.UnhandledException += (_, ex) => _log.Error($"Unhandled exception (terminating={ex.IsTerminating})", ex.ExceptionObject as Exception);
+        AppDomain.CurrentDomain.UnhandledException += (_, ex) =>
+        {
+            _log.Error($"Unhandled exception (terminating={ex.IsTerminating})", ex.ExceptionObject as Exception);
+            if (ex.IsTerminating) CrashRestart.TryRestart(Environment.ProcessPath, _log);
+        };
         TaskScheduler.UnobservedTaskException += (_, ex) => { _log.Error("Unobserved task exception", ex.Exception); ex.SetObserved(); };
 
         // After a self-update the old process may still be exiting; give it time to release the mutex.
-        var postUpdate = args.Contains("--post-update");
+        var postUpdate = args.Contains("--post-update") || args.Contains(CrashRestart.Argument);
         var wait = postUpdate ? TimeSpan.FromSeconds(30) : TimeSpan.Zero;
         try { _single = new SingleInstance(wait: wait); }
         catch (Exception ex)
@@ -117,7 +121,7 @@ public partial class App : Application
         if (startup.Action == StartupAction.RolledBack)
         {
             _log.Warn($"Rolled back to v{startup.Version}; restarting");
-            try { Process.Start(new ProcessStartInfo(installer.InstalledPath, "--post-update") { UseShellExecute = false }); }
+            try { Process.Start(new ProcessStartInfo(installer.LaunchPath, "--post-update") { UseShellExecute = false }); }
             catch (Exception ex) { _log.Error("Could not restart after rollback", ex); }
             Shutdown();
             return;
@@ -186,8 +190,9 @@ public partial class App : Application
     private void OpenReleasePage(string url)
     {
         if (!UpdateRepo.IsAllowedReleasePage(url)) { _log?.Warn("Refused to open release page: " + url); return; }
-        try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
-        catch (Exception ex) { _log?.Error("Could not open the release page", ex); }
+        if (UrlGuard.Launch(url, _log)) return;
+        _log?.Error("Could not open the release page", new InvalidOperationException(url));
+        UrlGuard.ShowLinkFallback(url);
     }
 
     private static HttpClient NewPlainClient(NetworkSettings n, TimeSpan timeout)

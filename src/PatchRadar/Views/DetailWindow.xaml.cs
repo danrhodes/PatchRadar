@@ -72,6 +72,7 @@ public partial class DetailWindow : Window
     {
         var u = _row.Update;
         Title = $"{u.Label} - PatchRadar";
+        _highlightBuilt = false;      // the row may have changed, so rebuild the keyword pattern
         Body.Children.Clear();
 
         Body.Children.Add(Text(u.Label, 18, FontWeights.Bold));
@@ -152,6 +153,16 @@ public partial class DetailWindow : Window
         if (_row.IsServicingStack && kb?.Status == KbStatus.NotFound) return;
         // Same for Defender updates: the note above points at Microsoft's Defender updates page.
         if (UrlGuard.UseDefenderPage(_row)) return;
+        if (kb is { Status: KbStatus.Blocked })
+        {
+            Body.Children.Add(Heading("Microsoft's support site is not answering right now"));
+            Body.Children.Add(Text("The support site refused PatchRadar's request (usually rate limiting or a network filter). PatchRadar has already tried several ways of asking and will keep trying automatically; nothing is wrong with this update.", 12));
+            if (kb.NextRetryUtc is { } retry)
+                Body.Children.Add(Text($"Next automatic attempt: {retry.ToLocalTime():d MMM HH:mm}. You can also press Refresh, or open the article in your browser.", 12, null, Brushes.Gray));
+            if (!string.IsNullOrWhiteSpace(kb.LastError))
+                Body.Children.Add(Text("Details: " + kb.LastError, 11, null, Brushes.Gray));
+            return;
+        }
         if (kb is null || kb.Status != KbStatus.Ok)
         {
             Body.Children.Add(Heading(kb?.Status == KbStatus.NotFound ? "No KB article" : "KB data unavailable"));
@@ -509,13 +520,26 @@ public partial class DetailWindow : Window
         return grid;
     }
 
+    // Built once per render, not once per paragraph (null = nothing to highlight).
+    private Regex? _highlight;
+    private bool _highlightBuilt;
+
+    private Regex? HighlightRegex()
+    {
+        if (_highlightBuilt) return _highlight;
+        _highlightBuilt = true;
+        var kws = _row.Result.MatchedKeywords.Where(k => !k.StartsWith("re:", StringComparison.OrdinalIgnoreCase)).ToList();
+        if (kws.Count > 0)
+            _highlight = new Regex(string.Join("|", kws.OrderByDescending(k => k.Length).Select(k => $@"(?<!\w){Regex.Escape(k)}(?!\w)")), RegexOptions.IgnoreCase);
+        return _highlight;
+    }
+
     private TextBlock Highlighted(string text, Brush? fg)
     {
         var tb = Text("", 12, null, fg);
         tb.Text = "";
-        var kws = _row.Result.MatchedKeywords.Where(k => !k.StartsWith("re:", StringComparison.OrdinalIgnoreCase)).ToList();
-        if (kws.Count == 0) { tb.Text = text; return tb; }
-        var rx = new Regex(string.Join("|", kws.OrderByDescending(k => k.Length).Select(k => $@"(?<!\w){Regex.Escape(k)}(?!\w)")), RegexOptions.IgnoreCase);
+        var rx = HighlightRegex();
+        if (rx is null) { tb.Text = text; return tb; }
         var pos = 0;
         foreach (Match m in rx.Matches(text))
         {

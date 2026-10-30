@@ -109,7 +109,7 @@ public sealed class AdvancedSettings : SettingsSection
 {
     public string LogLevel { get; set; } = "Information";
     public bool EnableReleaseHealthFallback { get; set; } = true;
-    public bool EnableWebView2Fallback { get; set; }
+    public bool EnableWebView2Fallback { get; set; } = true;
     /// <summary>Offer an Uninstall button for removable updates. Administrators only; off by default.</summary>
     public bool EnableUninstall { get; set; }
 }

@@ -55,9 +55,9 @@ public class WebViewSourceTests
     }
 
     [Fact]
-    public void IsOffByDefault_AndSettingTurnsItOn()
+    public void IsOnByDefault_AndSettingTurnsItOff()
     {
-        Assert.False(new AdvancedSettings().EnableWebView2Fallback);
+        Assert.True(new AdvancedSettings().EnableWebView2Fallback);
         Assert.False(Make(new FakeRenderer(true, _ => ""), enabled: false).IsEnabled);
         Assert.True(Make(new FakeRenderer(true, _ => "")).IsEnabled);
     }

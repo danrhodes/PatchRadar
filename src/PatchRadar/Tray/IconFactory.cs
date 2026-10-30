@@ -15,13 +15,15 @@ public static class IconFactory
     public static Icon For(Severity s, int pending = 0)
     {
         pending = Math.Clamp(pending, 0, 10);
-        if (Cache.TryGetValue((s, pending), out var icon)) return icon;
+        // The tray control disposes the icon it is replaced with, so it must never be handed the cached instance:
+        // the cache keeps the master copy and every caller gets its own clone.
+        if (Cache.TryGetValue((s, pending), out var icon)) return (Icon)icon.Clone();
         var name = s switch { Severity.Red => "red", Severity.Orange => "orange", Severity.Green => "green", _ => "grey" };
         var info = Application.GetResourceStream(new Uri($"pack://application:,,,/Assets/tray-{name}.ico"));
         var plain = new Icon(info.Stream);
         icon = pending == 0 ? plain : WithBadge(plain, pending);
         Cache[(s, pending)] = icon;
-        return icon;
+        return (Icon)icon.Clone();
     }
 
     private static Icon WithBadge(Icon plain, int count)

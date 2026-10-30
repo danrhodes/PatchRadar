@@ -47,6 +47,7 @@ public sealed class UpdateCoordinator : IDisposable
         {
             _timer?.Dispose();
             _timer = null;
+            if (_disposed) return;      // a check that finishes after shutdown must not start a new timer
             var delay = ComputeDelay(_settings(), _firstDone);
             if (delay is null) return;
             _timer = new Timer(OnTick, null, delay.Value, Timeout.InfiniteTimeSpan);
@@ -122,8 +123,10 @@ public sealed class UpdateCoordinator : IDisposable
         }
     }
 
+    private bool _disposed;
+
     public void Dispose()
     {
-        lock (_lock) { _timer?.Dispose(); _timer = null; }
+        lock (_lock) { _disposed = true; _timer?.Dispose(); _timer = null; }
     }
 }

@@ -175,7 +175,7 @@ public sealed class AppUpdater
         {
             case ApplyResult.Applied:
                 Set(new UpdateOutcome(UpdateOutcomeKind.Applied, version.ToString(), st.Release.HtmlUrl, $"Updating to v{version}…"));
-                try { _launcher.StartAndExit(_installer.InstalledPath, "--post-update"); }
+                try { _launcher.StartAndExit(_installer.LaunchPath, "--post-update"); }
                 catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or IOException)
                 {
                     // The new exe is already in place; the next launch (manual or at login) runs it and the health check still applies.

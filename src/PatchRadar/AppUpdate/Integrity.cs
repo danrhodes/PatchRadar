@@ -88,7 +88,7 @@ public sealed class AllowlistedDownloader : IFileDownloader
             if (!UpdateRepo.IsAllowedAssetUrl(current))
                 throw new UpdateCheckException($"Download refused: {SafeHost(current)} is not an allowed update host.");
 
-            var req = new HttpRequestMessage(HttpMethod.Get, current);
+            using var req = new HttpRequestMessage(HttpMethod.Get, current);
             req.Headers.UserAgent.ParseAdd(_userAgent);
             req.Headers.Accept.ParseAdd("application/octet-stream");
             HttpResponseMessage resp;

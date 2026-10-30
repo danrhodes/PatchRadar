@@ -146,7 +146,9 @@ public sealed class SettingsWindow : Window
 
         tabs.Items.Add(Tab("Advanced", Stack(Row("Log level", _logLevel), _releaseHealth, _webView2,
             _uninstall,
-            Label("Shows an Uninstall button on updates that Windows can really remove (the newest cumulative update, standalone updates). It is never shown to standard users, never for servicing stack updates, and every removal asks for confirmation and is recorded with your user name and the time. Off by default."))));
+            Label("Shows an Uninstall button on updates that Windows can really remove (the newest cumulative update, standalone updates). It is never shown to standard users, never for servicing stack updates, and every removal asks for confirmation and is recorded with your user name and the time. Off by default."),
+            MakeButton("Uninstall PatchRadar…", (_, _) => RemoveApp()),
+            Label("Removes PatchRadar from this PC: the run-at-login entry and the program file. You can also choose to delete its settings and history. Use this instead of deleting the exe by hand."))));
 
         var save = MakeButton("Save", Save_Click);
         save.IsDefault = true;
@@ -368,6 +370,26 @@ public sealed class SettingsWindow : Window
     };
 
     private static TextBlock Label(string text) => new() { Text = text, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 4) };
+
+    private void RemoveApp()
+    {
+        var confirm = MessageBox.Show(this,
+            "Remove PatchRadar from this PC?\n\nThis stops PatchRadar, removes it from Windows startup and deletes the program file.",
+            "Uninstall PatchRadar", MessageBoxButton.YesNo, MessageBoxImage.Question);
+        if (confirm != MessageBoxResult.Yes) return;
+        var data = MessageBox.Show(this,
+            "Also delete PatchRadar's settings, review history and logs?\n\nChoose No to keep them in case you reinstall.",
+            "Uninstall PatchRadar", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes;
+        try
+        {
+            AppRemoval.Start(new RegistryRunKey(), Environment.ProcessPath, data);
+            Application.Current.Shutdown();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, "PatchRadar could not be removed: " + ex.Message, "Uninstall PatchRadar", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
 
     private static Button MakeButton(string text, RoutedEventHandler click)
     {

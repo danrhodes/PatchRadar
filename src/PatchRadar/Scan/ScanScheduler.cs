@@ -37,6 +37,7 @@ public sealed class ScanScheduler : IDisposable
         {
             _timer?.Dispose();
             _timer = null;
+            if (_disposed) return;      // a scan that finishes after shutdown must not start a new timer
             var delay = ComputeDelay(_settings(), _startupDone);
             if (delay is null) { NextScan = null; return; }
             NextScan = DateTime.Now + delay;
@@ -54,5 +55,7 @@ public sealed class ScanScheduler : IDisposable
     /// <summary>A manual scan restarts the interval clock.</summary>
     public void NotifyManualScan() { _startupDone = true; Reschedule(); }
 
-    public void Dispose() { lock (_lock) { _timer?.Dispose(); _timer = null; } }
+    private bool _disposed;
+
+    public void Dispose() { lock (_lock) { _disposed = true; _timer?.Dispose(); _timer = null; } }
 }

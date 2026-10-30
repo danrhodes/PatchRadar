@@ -44,7 +44,11 @@ PatchRadar flags it red, because an improvement that matches a *change phrase* (
 - **Export** the list as CSV, JSON or a Markdown table that pastes cleanly into a ticket. **Copy summary** puts one update's findings on the clipboard.
 - **Notifications** for new red updates, once per update per article revision.
 - **Light, dark or follow-the-system theme, adjustable text size**, and every threshold, keyword and colour is configurable.
-- **Self-updating** from GitHub Releases, with checksum verification and automatic rollback.
+- **Self-updating** from GitHub Releases, with checksum verification and automatic rollback. After an update the exe is renamed to the new version (`PatchRadar-v1.2.1-win-x64.exe`), and the run-at-login entry follows it.
+- **Survives a blocked support site.** If `support.microsoft.com` answers 403 or 429, PatchRadar retries with different request styles, then Windows release health, then a hidden browser render. If it still cannot read an article, the detail window says so and that PatchRadar will keep trying.
+- **Links that open on locked-down PCs.** When Windows will not hand a link to the default browser (a managed PC that answers "Access is denied"), PatchRadar tries other ways of opening it and, as a last resort, copies the link to the clipboard and tells you.
+- **Restarts itself after a crash** (at most once every five minutes, so it can never loop).
+- **Clean removal.** *Uninstall PatchRadar…* in Settings, Advanced removes the startup entry and the program file, and optionally your settings and history. See [Removing PatchRadar](#removing-patchradar).
 - **No telemetry, no service, no admin rights.**
 
 ## Screenshots
@@ -127,6 +131,10 @@ Filter by risk, category, review state and date. Export respects the filter.
 
 Why per-user: the folder is writable without elevation, so the built-in updater can replace the exe in place. In `Program Files` the updater cannot write, so it falls back to telling you a new version exists.
 
+Keep the exe in a folder that stays put (not Downloads, which cleanup tools empty). If the file is moved or deleted by hand, the start-at-login entry is left pointing at nothing. To remove PatchRadar, use [Removing PatchRadar](#removing-patchradar) instead of deleting the file.
+
+When PatchRadar updates itself it renames the file to match the new version, so `PatchRadar-v1.1.0-win-x64.exe` becomes `PatchRadar-v1.2.1-win-x64.exe` and the start-at-login entry is updated to match. A file name with no version in it (for example `PatchRadar.exe`) is kept as it is.
+
 **Verify your download** (see [Code signing policy](#code-signing-policy) and [Provenance](#provenance-and-integrity)):
 
 ```powershell
@@ -186,7 +194,9 @@ Click any update. From the top:
 4. **Behaviour changes**: improvements flagged as risky, highlighted.
 5. **Improvements**: the full list, collapsed.
 
-Buttons: **Mark reviewed**, **Open KB article** (your browser), **Copy summary** (plain text for ticket notes), **Refresh**.
+If Microsoft's support site is refusing requests, the window says so in place of the article, shows when PatchRadar will next try, and suggests **Refresh** or opening the article in your browser. Nothing is wrong with the update itself.
+
+Buttons: **Mark reviewed**, **Ignore**, **Open KB article** (your browser; if Windows will not open it, the link is copied to the clipboard), **Copy summary** (plain text for ticket notes), **Refresh**.
 
 > "Resolution (per Microsoft)" is the heading Microsoft uses. In practice it is sometimes guidance (a registry change, a policy) rather than a fix. A **Fix** line only appears when an update is actually named.
 
@@ -271,7 +281,13 @@ You can add a **reason or ticket reference**. The **Uninstall** button stays dis
 4. Active issues and behaviour changes are matched against the **critical keywords** (word-boundary, case-insensitive).
 5. Fix information comes from the article text ("addressed in KB…", "resolved in the out-of-band update KB…") and from the Windows **release health** page for your OS, matched by the update that introduced the issue.
 
-If the support site blocks a request, PatchRadar falls back to release health (known issues only) and, if you enable it, a hidden browser render of the real article. Fetches are rate-limited (two at a time, 500 ms apart), cached, and retried with back-off.
+If the support site blocks a request (HTTP 403 or 429), PatchRadar works down a list:
+
+1. The plain request is retried in a different style: the `en-us` page with Edge's identity and full browser-style headers, then the `en-gb` page as Firefox. If the site sends a `Retry-After`, it is honoured (up to 30 seconds).
+2. A hidden browser render of the real article (WebView2, on by default; skipped cleanly where the runtime is missing).
+3. Windows release health, which supplies known issues only.
+
+If all of that fails the update stays grey, the detail window explains that the site is not answering, and PatchRadar keeps retrying on its own (after 1 hour, then 6, then daily). Fetches are rate-limited (two at a time, 500 ms apart) and cached. A scan reads articles side by side within that limit, and starts the Windows Update search for pending updates at the same time, so one slow retry does not hold up the rest.
 
 ## Settings reference
 
@@ -319,7 +335,7 @@ Settings live in `%APPDATA%\PatchRadar\settings.json`. Use the Settings window, 
 | advanced | `logLevel` | `Information` | |
 | | `enableReleaseHealthFallback` | `true` | Release health as fallback and enrichment. |
 | | `enableUninstall` | `false` | Offer **Uninstall…** to administrators on removable updates. See [Uninstalling an update](#uninstalling-an-update-advanced-administrators-only). |
-| | `enableWebView2Fallback` | `false` | Hidden browser render when the site blocks plain requests. Needs the WebView2 runtime, which is often absent on Servers (skipped cleanly). |
+| | `enableWebView2Fallback` | `true` | Hidden browser render when the site blocks plain requests. Needs the WebView2 runtime, which is often absent on Servers (skipped cleanly). Installs that saved this as `false` keep it off. |
 
 ### Tuning the keywords
 
@@ -337,7 +353,7 @@ After changing keywords, press **Scan now**; severity is recomputed from the cac
 
 ## App updates
 
-By default PatchRadar checks GitHub Releases once a day and updates itself on the **Stable** channel. It downloads the exe, checks its SHA-256 against the `.sha256` asset in the same release, swaps it in place, and restarts. If the new build does not stay up for 60 seconds on two starts, it rolls back to the previous exe and skips that version. A development build never updates itself.
+By default PatchRadar checks GitHub Releases once a day and updates itself on the **Stable** channel. It downloads the exe, checks its SHA-256 against the `.sha256` asset in the same release, swaps it in place under the new version's file name, and restarts. The previous exe is kept as `.old` until the new build has stayed up for 60 seconds. If the new build does not stay up on two starts, PatchRadar rolls back to the previous exe (with its old name) and skips that version. A development build never updates itself.
 
 - **Off**: no automatic checks (the tray's manual check still works, as Notify).
 - **Notify**: shows a notification and a menu item that opens the release page.
@@ -379,7 +395,15 @@ Everything stays on your machine:
 | Logs (daily, 14 kept) | `%LOCALAPPDATA%\PatchRadar\logs\` |
 | Downloaded updates | `%LOCALAPPDATA%\PatchRadar\updates\` |
 
-To uninstall PatchRadar: exit it, delete the exe and the two folders above, and remove the `PatchRadar` value from `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` (turning off **Run at login** first does this for you).
+### Removing PatchRadar
+
+Use **Settings, Advanced, Uninstall PatchRadar…**. It asks for confirmation, then asks separately whether to also delete your settings, review history and logs (choose No to keep them in case you reinstall). Then it:
+
+1. removes the `PatchRadar` value from `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`;
+2. exits PatchRadar;
+3. deletes the exe and its `.old` and `.failed` leftovers, and the two data folders above if you chose to, using a small script that waits for PatchRadar to finish exiting.
+
+Please use this instead of deleting the exe by hand. Deleting it yourself leaves the start-at-login entry behind, and PatchRadar cannot clean that up because it is no longer there. To do it manually: exit PatchRadar, delete the exe, and remove the `Run` value above. It also removes the two folders in the table if you want to clear your data.
 
 PatchRadar **reads** update history. It installs nothing and never hides updates. The only change it can make to the machine is the optional, administrator-only, audited [uninstall](#uninstalling-an-update-advanced-administrators-only), which is off unless you turn it on.
 
@@ -387,13 +411,19 @@ PatchRadar **reads** update history. It installs nothing and never hides updates
 
 **An update is grey.** There is no usable data. Hover or open it: the window shows why (Microsoft has no article, the request was blocked, or it has not been fetched yet). Defender definition, Malicious Software Removal Tool and many driver updates have no KB article. Press **Refresh** in the detail window to retry now; otherwise it retries on a back-off (1 hour, 6 hours, then daily; 404s weekly).
 
-**It says "bot challenge" or HTTP 403.** The support site sometimes blocks automated requests. Release health will still supply known issues. For full articles, turn on `enableWebView2Fallback` (needs the WebView2 runtime) or wait; blocked requests retry later. Keep the request volume low: do not shorten the cache intervals.
+**It says "bot challenge" or HTTP 403.** The support site sometimes blocks automated requests. PatchRadar already tries other request styles, a hidden browser render (needs the WebView2 runtime) and release health (known issues only), and keeps retrying on its own; see [How the risk is decided](#how-the-risk-is-decided). Press **Refresh** to try now, or open the article in your browser. Keep the request volume low: do not shorten the cache intervals.
+
+**"Open KB article" does nothing.** On some managed PCs Windows refuses to hand links to the default browser ("Access is denied" in the log). PatchRadar tries several other launchers; if none works it copies the link to the clipboard and says so. Paste it into a browser. If this happens on a machine you manage, check the default-apps and browser policies.
+
+**PatchRadar closed on its own.** It restarts itself after a crash, at most once every five minutes. Details of the crash are in the log (**Open log folder**); please attach the day's log to an issue.
 
 **Everything is red.** The critical keyword list is deliberately broad. Remove words that do not matter in your environment (see [Tuning the keywords](#tuning-the-keywords)), or review items you have dealt with.
 
 **An update is red but I cannot see a fix.** The At a glance panel says whether a fix or workaround is published. If it says none, there is nothing to apply yet; **Refresh** later, because Microsoft edits these articles.
 
 **The fix is "not installed on this PC".** Install the named update (often an out-of-band update) from Windows Update or the Microsoft Update Catalog, then **Scan now**.
+
+**How do I remove PatchRadar?** Settings, Advanced, **Uninstall PatchRadar…** (see [Removing PatchRadar](#removing-patchradar)). Do not just delete the exe: the start-at-login entry would be left behind.
 
 **The icon is missing.** Windows hides new tray icons behind the overflow arrow. Drag it out, or check Settings, Personalisation, Taskbar.
 

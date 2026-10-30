@@ -285,46 +285,38 @@ public sealed class ScanService
             var failed = 0;
             progress?.Report((0, targets.Count));
 
-            var results = new Dictionary<string, KbData?>(StringComparer.OrdinalIgnoreCase);
-            foreach (var u in targets)
+            // The Windows Update search is slow (tens of seconds) and independent of the articles: start it now.
+            var pendingTask = GetPendingAsync(online: true, ct);
+
+            // Articles are fetched side by side. The request gate still caps concurrency and spaces requests out,
+            // but a slow retry on one article (a 403 backoff) no longer holds up all the others.
+            var results = new System.Collections.Concurrent.ConcurrentDictionary<string, KbData?>(StringComparer.OrdinalIgnoreCase);
+            async Task FetchOne(InstalledUpdate u, bool countFetched, bool reportProgress)
             {
-                ct.ThrowIfCancellationRequested();
                 try
                 {
                     var before = _fetcher.GetCached(u.Kb);
                     var kb = await _fetcher.GetAsync(u, s.Scanning, force, ct).ConfigureAwait(false);
                     results[u.Kb] = kb;
-                    if (!ReferenceEquals(before, kb) && kb?.Status == KbStatus.Ok) fetched++;
-                    if (kb?.Status != KbStatus.Ok) failed++;
+                    if (countFetched && !ReferenceEquals(before, kb) && kb?.Status == KbStatus.Ok) Interlocked.Increment(ref fetched);
+                    if (kb?.Status != KbStatus.Ok) Interlocked.Increment(ref failed);
                 }
                 catch (OperationCanceledException) { throw; }
                 catch (Exception ex)
                 {
                     _log.Error($"Fetch {u.Kb} failed", ex);
-                    failed++;
+                    Interlocked.Increment(ref failed);
                 }
-                progress?.Report((++done, targets.Count));
+                if (reportProgress) progress?.Report((Interlocked.Increment(ref done), targets.Count));
             }
 
+            await Task.WhenAll(targets.Select(u => FetchOne(u, countFetched: true, reportProgress: true))).ConfigureAwait(false);
+
             // Pending updates: read the article for each so the user can prepare before installing.
-            var pending = await GetPendingAsync(online: true, ct).ConfigureAwait(false);
+            var pending = await pendingTask.ConfigureAwait(false);
             _log.Info($"Scan: {pending.Count} pending updates");
-            foreach (var u in pending.Where(p => p.HasKb).Take(MaxPendingFetched))
-            {
-                ct.ThrowIfCancellationRequested();
-                try
-                {
-                    var kb = await _fetcher.GetAsync(u, s.Scanning, force, ct).ConfigureAwait(false);
-                    results[u.Kb] = kb;
-                    if (kb?.Status != KbStatus.Ok) failed++;
-                }
-                catch (OperationCanceledException) { throw; }
-                catch (Exception ex)
-                {
-                    _log.Error($"Fetch pending {u.Kb} failed", ex);
-                    failed++;
-                }
-            }
+            await Task.WhenAll(pending.Where(p => p.HasKb).Take(MaxPendingFetched)
+                .Select(u => FetchOne(u, countFetched: false, reportProgress: false))).ConfigureAwait(false);
 
             var engine = new SeverityEngine(s.ToSeverityOptions());
             var snap = Snapshot();

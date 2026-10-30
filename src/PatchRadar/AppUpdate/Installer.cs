@@ -41,6 +41,8 @@ public sealed class PendingUpdate
     public string To { get; set; } = "";
     public int Attempts { get; set; }
     public bool Healthy { get; set; }
+    /// <summary>Where the previous exe lived when the update also renamed the file to the new version; its .old copy is the rollback source.</summary>
+    public string? PreviousExePath { get; set; }
 }
 
 public sealed class PendingStore(string updatesDir, ILog? log = null)
@@ -106,13 +108,30 @@ public sealed class UpdateInstaller(IInstallFileOps ops, PendingStore pending, s
 {
     private readonly ILog _log = log ?? NullLog.Instance;
     public string InstalledPath => installedExePath;
+
+    /// <summary>The exe to start next: the renamed file after Apply, the restored file after Rollback.</summary>
+    public string LaunchPath { get => _launchPath ?? installedExePath; private set => _launchPath = value; }
+    private string? _launchPath;
+
     public string OldPath => installedExePath + ".old";
+
+    private static readonly System.Text.RegularExpressions.Regex VersionInName = new(
+        @"(?<=v)\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+?)??(?=-(?:win|linux|osx|x64|x86|arm)|\.exe$)",
+        System.Text.RegularExpressions.RegexOptions.Compiled | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    /// <summary>PatchRadar-v1.1.0-win-x64.exe becomes PatchRadar-v1.2.1-win-x64.exe. A name with no version in it is kept.</summary>
+    public static string RenamedFor(string exePath, AppVersion to)
+    {
+        var name = Path.GetFileName(exePath);
+        var renamed = VersionInName.Replace(name, to.ToString(), 1);
+        return renamed == name ? exePath : Path.Combine(Path.GetDirectoryName(exePath)!, renamed);
+    }
     public string FailedPath => installedExePath + ".failed";
 
     /// <summary>False when hosted by another exe (dotnet.exe under "dotnet run"), which must never be replaced.</summary>
     public bool IsPatchRadarExe => Path.GetFileName(installedExePath).StartsWith("PatchRadar", StringComparison.OrdinalIgnoreCase);
 
-    public bool CanWrite => ops.IsDirectoryWritable(Path.GetDirectoryName(installedExePath)!);
+    public bool CanWrite => Path.GetDirectoryName(installedExePath) is { Length: > 0 } dir && ops.IsDirectoryWritable(dir);
 
     public ApplyResult Apply(string verifiedExe, AppVersion from, AppVersion to)
     {
@@ -139,24 +158,41 @@ public sealed class UpdateInstaller(IInstallFileOps ops, PendingStore pending, s
             return ApplyResult.Failed;
         }
 
-        try { ops.Copy(verifiedExe, installedExePath); }
+        // Name the new file after the new version so the file name never disagrees with what is running.
+        // If that name is already taken, replace in place instead.
+        var target = RenamedFor(installedExePath, to);
+        if (!target.Equals(installedExePath, StringComparison.OrdinalIgnoreCase) && ops.Exists(target)) target = installedExePath;
+        var renamed = !target.Equals(installedExePath, StringComparison.OrdinalIgnoreCase);
+
+        try { ops.Copy(verifiedExe, target); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             _log.Error("Update aborted: could not place the new exe; restoring the current one", ex);
+            try { if (renamed && ops.Exists(target)) ops.Delete(target); } catch { }
             Restore();
             return ApplyResult.Failed;
         }
 
-        try { pending.Save(new PendingUpdate { From = from.ToString(), To = to.ToString(), Attempts = 0, Healthy = false }); }
+        try
+        {
+            pending.Save(new PendingUpdate
+            {
+                From = from.ToString(), To = to.ToString(), Attempts = 0, Healthy = false,
+                PreviousExePath = renamed ? installedExePath : null,
+            });
+        }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             _log.Error("Update aborted: could not write pending.json; restoring the current exe", ex);
-            try { ops.Delete(installedExePath); } catch { }
+            try { ops.Delete(target); } catch { }
             Restore();
             return ApplyResult.Failed;
         }
 
-        _log.Info($"Update {from} -> {to} staged in place; restart required");
+        LaunchPath = target;
+        _log.Info(renamed
+            ? $"Update {from} -> {to} staged as {Path.GetFileName(target)}; restart required"
+            : $"Update {from} -> {to} staged in place; restart required");
         return ApplyResult.Applied;
     }
 
@@ -192,15 +228,19 @@ public sealed class UpdateInstaller(IInstallFileOps ops, PendingStore pending, s
     {
         try
         {
-            if (!ops.Exists(OldPath)) { _log.Error("Rollback impossible: no .old copy"); return false; }
+            // When the update renamed the file, the previous exe's .old copy sits under its old name.
+            var restoreTo = pending.Load()?.PreviousExePath is { Length: > 0 } prev ? prev : installedExePath;
+            var oldCopy = restoreTo + ".old";
+            if (!ops.Exists(oldCopy)) { _log.Error("Rollback impossible: no .old copy"); return false; }
             if (ops.Exists(FailedPath)) ops.Delete(FailedPath);
             ops.Move(installedExePath, FailedPath);
-            try { ops.Move(OldPath, installedExePath); }
+            try { ops.Move(oldCopy, restoreTo); }
             catch
             {
                 ops.Move(FailedPath, installedExePath);   // put the failing build back rather than leave nothing
                 throw;
             }
+            LaunchPath = restoreTo;
             return true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -213,7 +253,9 @@ public sealed class UpdateInstaller(IInstallFileOps ops, PendingStore pending, s
     /// <summary>Best-effort removal of leftovers from a finished update.</summary>
     public void CleanLeftovers()
     {
-        foreach (var p in new[] { OldPath, FailedPath })
+        var previous = pending.Load()?.PreviousExePath;
+        var leftovers = previous is { Length: > 0 } ? new[] { OldPath, FailedPath, previous + ".old" } : new[] { OldPath, FailedPath };
+        foreach (var p in leftovers)
         {
             try { if (ops.Exists(p)) ops.Delete(p); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
         }
@@ -247,8 +289,8 @@ public sealed class UpdateHealth(PendingStore pending, UpdateInstaller installer
         {
             // Not the build pending.json was written for (manual replace, or already rolled back).
             _log.Info($"Ignoring stale pending.json (to {p.To}, running {running})");
+            installer.CleanLeftovers();      // before pending.json goes: it names the previous exe's .old
             pending.Delete();
-            installer.CleanLeftovers();
             return new StartupOutcome(StartupAction.Normal);
         }
 

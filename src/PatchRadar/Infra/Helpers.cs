@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.IO;
 using System.Text;
 using PatchRadar.Core;
 using PatchRadar.Scan;
@@ -69,11 +70,67 @@ public static class UrlGuard
                 u.Host.EndsWith(".microsoft.com", StringComparison.OrdinalIgnoreCase));
     }
 
+    /// <summary>
+    /// Open a URL, trying several launchers: the default https handler is blocked or broken on some managed PCs
+    /// (the shell answers "Access is denied"), and starting a browser exe directly often still works.
+    /// The caller has already checked the URL is allowed. Returns false when every launcher failed.
+    /// </summary>
+    public static bool Launch(string url, ILog? log = null)
+    {
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var attempts = new (string File, string Args, bool Shell)[]
+        {
+            (url, "", true),
+            ("explorer.exe", $"\"{url}\"", false),
+            ("rundll32.exe", $"url.dll,FileProtocolHandler {url}", false),
+            ("msedge", url, true),
+            ("chrome", url, true),
+            ("firefox", url, true),
+        };
+        foreach (var (file, args, shell) in attempts)
+        {
+            try
+            {
+                var psi = new ProcessStartInfo(file, args) { UseShellExecute = shell };
+                if (Directory.Exists(home)) psi.WorkingDirectory = home;
+                Process.Start(psi)?.Dispose();      // the launched program keeps running; we only drop our handle
+                return true;
+            }
+            catch (Exception ex) { log?.Warn($"Could not open a link via {(file == url ? "the shell" : file)}: {ex.Message}"); }
+        }
+        return false;
+    }
+
     public static void OpenInBrowser(string? url, ILog? log = null)
     {
-        if (!IsSafe(url)) { log?.Warn($"Refused to open URL: {url}"); return; }
-        try { Process.Start(new ProcessStartInfo(url!) { UseShellExecute = true }); }
-        catch (Exception ex) { log?.Error("Could not open browser", ex); }
+        if (!IsSafe(url))
+        {
+            log?.Warn($"Refused to open URL: {url}");
+            try
+            {
+                System.Windows.MessageBox.Show(
+                    "PatchRadar can only open https links on Microsoft sites, and this update has no valid article link.",
+                    "PatchRadar", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Information);
+            }
+            catch { }
+            return;
+        }
+        if (Launch(url!, log)) return;
+        log?.Error("Could not open browser", new InvalidOperationException(url));
+        ShowLinkFallback(url!);
+    }
+
+    /// <summary>Nothing could open the link: tell the user and put it on the clipboard so they can paste it into a browser.</summary>
+    public static void ShowLinkFallback(string url)
+    {
+        try { System.Windows.Clipboard.SetText(url); } catch { }
+        try
+        {
+            System.Windows.MessageBox.Show(
+                $"PatchRadar could not open your web browser.\n\nThe link has been copied to the clipboard:\n{url}",
+                "PatchRadar", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Information);
+        }
+        catch { }
     }
 }
 
