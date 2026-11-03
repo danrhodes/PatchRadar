@@ -467,6 +467,8 @@ Useful command-line modes:
 | `tools/test-matrix.ps1 -Exe PatchRadar.exe` | Self-check for a machine in the OS matrix. |
 | `tools/make-icons.ps1` | Regenerates the icons in `assets/`. |
 
+Every third-party component, with versions, for CVE checking: [SBOM.md](SBOM.md) (bill of materials).
+
 The architecture and every decision are in [guide.md](guide.md); progress and the decision log are in [tracker.md](tracker.md). Releases are built by GitHub Actions: every push to `main` makes an unsigned pre-release, and a manual run makes a signed full release.
 
 ## Contributing
