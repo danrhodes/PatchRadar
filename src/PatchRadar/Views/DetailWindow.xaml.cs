@@ -9,6 +9,7 @@ using PatchRadar.Infra;
 using PatchRadar.Kb;
 using PatchRadar.Scan;
 using PatchRadar.Settings;
+using PatchRadar.Updates;
 using PatchRadar.State;
 using PatchRadar.Uninstall;
 
@@ -92,6 +93,10 @@ public partial class DetailWindow : Window
             Body.Children.Add(Text("Why it failed: " + failure, 12, null, SeverityBrush(Severity.Red)));
         if (_row.DriverNote is { } driver)
             Body.Children.Add(Text("Driver: " + driver, 12, null, null, new Thickness(0, 4, 0, 0)));
+        if (u.Category == UpdateCategory.Driver && DriverVendors.Find(u.Title) is { } vendor)
+            Body.Children.Add(VendorNote(vendor, DriverVendors.Machine is { } maker && maker != vendor ? maker : null));
+        else if (u.Category == UpdateCategory.Driver && DriverVendors.Machine is { } makerOnly)
+            Body.Children.Add(VendorNote(null, makerOnly));
         if (_row.Advice is { } advice)
             Body.Children.Add(new Border
             {
@@ -280,6 +285,42 @@ public partial class DetailWindow : Window
         var link = new Hyperlink(new Run("Microsoft Defender Antivirus updates")) { ToolTip = UrlGuard.DefenderUpdatesUrl };
         link.Click += (_, _) => UrlGuard.OpenInBrowser(UrlGuard.DefenderUpdatesUrl, _log);
         t.Inlines.Add(link);
+        return new Border
+        {
+            Background = new SolidColorBrush(Color.FromArgb(40, 128, 128, 128)),
+            BorderBrush = SeverityBrush(Severity.Grey), BorderThickness = new Thickness(2, 0, 0, 0),
+            Padding = new Thickness(8, 4, 8, 4), Margin = new Thickness(0, 8, 0, 0), Child = t,
+        };
+    }
+
+    /// <summary>
+    /// Drivers have no KB article: link the hardware vendor's own support page, and this PC's maker, since component
+    /// makers (fingerprint readers, touchpads, audio) usually ship their drivers through the PC maker.
+    /// </summary>
+    private Border VendorNote(DriverVendor? vendor, DriverVendor? maker)
+    {
+        var t = Text("", 12, null, null, new Thickness(0));
+        t.Inlines.Add(new Run("Driver update") { FontWeight = FontWeights.SemiBold });
+        t.Inlines.Add(new Run(": Microsoft publishes no KB article for drivers. "));
+        Hyperlink Link(DriverVendor v, string text)
+        {
+            var link = new Hyperlink(new Run(text)) { ToolTip = v.SupportUrl };
+            link.Click += (_, _) => UrlGuard.OpenVendorPage(v.SupportUrl, _log);
+            return link;
+        }
+        if (vendor is not null)
+        {
+            t.Inlines.Add(new Run("Release notes and downloads are on the vendor's site: "));
+            t.Inlines.Add(Link(vendor, $"{vendor.Name} support"));
+            t.Inlines.Add(new Run(". "));
+        }
+        if (maker is not null)
+        {
+            t.Inlines.Add(new Run(vendor is null ? "Drivers like this usually come through the PC maker: " : "It may also come through the PC maker: "));
+            t.Inlines.Add(Link(maker, $"{maker.Name} support"));
+            t.Inlines.Add(new Run(". "));
+        }
+        t.Inlines.Add(new Run("These open the main support page; search it for the device and version above."));
         return new Border
         {
             Background = new SolidColorBrush(Color.FromArgb(40, 128, 128, 128)),

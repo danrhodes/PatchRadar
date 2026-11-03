@@ -120,6 +120,15 @@ public static class UrlGuard
         ShowLinkFallback(url!);
     }
 
+    /// <summary>Open a hardware vendor's support page. Only URLs from the fixed vendor table are accepted.</summary>
+    public static void OpenVendorPage(string? url, ILog? log = null)
+    {
+        if (!PatchRadar.Updates.DriverVendors.IsKnownUrl(url)) { log?.Warn($"Refused to open vendor URL: {url}"); return; }
+        if (Launch(url!, log)) return;
+        log?.Error("Could not open browser", new InvalidOperationException(url));
+        ShowLinkFallback(url!);
+    }
+
     /// <summary>Nothing could open the link: tell the user and put it on the clipboard so they can paste it into a browser.</summary>
     public static void ShowLinkFallback(string url)
     {

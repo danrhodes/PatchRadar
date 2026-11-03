@@ -38,6 +38,7 @@ public sealed class TrayController : IDisposable
     private (int Done, int Total)? _progress;
     private bool _scanning;
     private bool _restart;
+    private DateTime? _restartAt;
     private readonly PendingSeenStore? _seen;
     private readonly RebootReminder? _reboot;
     private readonly bool _isServer = Kb.OsInfo.Current().IsServer;
@@ -253,7 +254,7 @@ public sealed class TrayController : IDisposable
         var rows = _last.Rows.Take(take).ToList();
         var s = $"PatchRadar — {rows.Count} updates · {rows.Count(r => r.Severity == Severity.Red)} red · {rows.Count(r => r.Severity == Severity.Orange)} orange";
         if (PendingCount > 0) s += $" · {PendingCount} pending";
-        if (_restart) s += " · restart needed";
+        if (_restart) s += " · Windows needs a restart";
         s += $" · up {Uptime.Describe(Uptime.Current())}";
         if (_last.ScannedAt != DateTime.MinValue) s += $" · scanned {_last.ScannedAt:HH:mm}";
         return s.Length > 127 ? s[..127] : s; // NotifyIcon tooltip limit
@@ -308,8 +309,7 @@ public sealed class TrayController : IDisposable
             IsEnabled = false,
             Foreground = longUp ? SeverityBrushes.For(Severity.Orange, colors) : System.Windows.SystemColors.GrayTextBrush,
         });
-        if (_restart)
-            menu.Items.Add(new MenuItem { Header = "⟳ Restart needed to finish installing updates", IsEnabled = false, Foreground = SeverityBrushes.For(Severity.Orange, colors) });
+        if (_restart) menu.Items.Add(RestartItem(colors));
 
         if (_last.Pending.Count > 0)
         {
@@ -354,6 +354,71 @@ public sealed class TrayController : IDisposable
         AddItem(menu, "Exit", () => Application.Current.Shutdown());
         menu.Opened += (_, _) => OnMenuOpened();
         _icon.ContextMenu = menu;
+    }
+
+    /// <summary>
+    /// "Windows needs a restart" with the ways to do it. It is Windows that is waiting, not PatchRadar, so the
+    /// wording says so; the submenu restarts now (after a confirmation) or schedules one through shutdown.exe.
+    /// </summary>
+    private MenuItem RestartItem(ColorSettings colors)
+    {
+        var scheduled = _restartAt is { } at && at > DateTime.Now ? at : (DateTime?)null;
+        var header = scheduled is { } s
+            ? $"⟳ Windows will restart at {s:HH:mm}"
+            : "⟳ Windows needs a restart to finish installing updates";
+        var root = new MenuItem { Header = header, Foreground = SeverityBrushes.For(Severity.Orange, colors) };
+
+        void Add(string text, Action click)
+        {
+            var mi = new MenuItem { Header = text };
+            mi.Click += (_, _) => Later(click);
+            root.Items.Add(mi);
+        }
+
+        Add("Restart Windows now…", RestartNowWithConfirm);
+        Add("Restart in 15 minutes", () => ScheduleRestart(15 * 60));
+        Add("Restart in 1 hour", () => ScheduleRestart(60 * 60));
+        Add("Restart in 4 hours", () => ScheduleRestart(4 * 60 * 60));
+        Add("Restart tonight at 02:00", () => ScheduleRestart(WindowsRestart.SecondsUntilNext(DateTime.Now, 2)));
+        if (scheduled is not null)
+        {
+            root.Items.Add(new Separator());
+            Add("Cancel scheduled restart", CancelRestart);
+        }
+        return root;
+    }
+
+    private void RestartNowWithConfirm()
+    {
+        var answer = MessageBox.Show(
+            "Windows will restart in a few seconds to finish installing updates.\n\nSave your work first. Any unsaved work in open programs may be lost.\n\nRestart now?",
+            "Restart Windows", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+        if (answer == MessageBoxResult.Yes) ScheduleRestart(WindowsRestart.NowSeconds);
+    }
+
+    private void ScheduleRestart(int seconds)
+    {
+        // Replace an earlier schedule: shutdown.exe refuses a second timer while one is running.
+        if (_restartAt is not null) WindowsRestart.Cancel(_log);
+        if (WindowsRestart.Restart(seconds, _log))
+        {
+            _restartAt = DateTime.Now.AddSeconds(seconds);
+            RebuildMenu();
+            if (seconds > WindowsRestart.NowSeconds)
+                ShowToast("Restart scheduled", $"Windows will restart at {_restartAt:HH:mm}. Cancel it from the PatchRadar tray menu.");
+            return;
+        }
+        _restartAt = null;
+        MessageBox.Show("Windows would not accept the restart request. Your account may not be allowed to restart this PC. Restart it from the Start menu instead.",
+            "Restart Windows", MessageBoxButton.OK, MessageBoxImage.Warning);
+    }
+
+    private void CancelRestart()
+    {
+        var cancelled = WindowsRestart.Cancel(_log);
+        _restartAt = null;
+        RebuildMenu();
+        if (cancelled) ShowToast("Restart cancelled", "The scheduled restart was cancelled.");
     }
 
     private void AddUpdateItems(ContextMenu menu)

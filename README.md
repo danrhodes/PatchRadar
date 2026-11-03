@@ -30,6 +30,7 @@ PatchRadar flags it red, because an improvement that matches a *change phrase* (
 - **Pending briefing.** *Pending briefing…* in the tray menu writes a Markdown note for the updates waiting to install: risk, known issues, workarounds, behaviour changes and one line of advice (for example "Consider deferring: 2 active known issues with no fix or workaround"). Copy it into a ticket or save it. Drivers, which have no KB article, are listed too, with a comparison against the version already installed.
 - **Restart needed, and restart reminders.** The tray menu shows how long the PC has been up and says when Windows is waiting for a restart to finish installing updates. After 14 days without a restart (configurable, repeating every 3 days) a notification reminds you. Off on Windows Server unless you turn it on, with its own longer threshold. See Settings > General.
 - **New-pending badge.** A count on the tray icon flags pending updates you have not looked at yet. It clears when you open the menu and returns when something new turns up.
+- **Vendor links for drivers.** Drivers have no KB article, so for about 50 well-known hardware vendors (Intel, Lenovo, Dell, HP, Realtek, NVIDIA, Logitech, Brother and so on) the detail window links the vendor's own support page. These are fixed landing pages; PatchRadar contacts nothing until you click.
 - **Why an install failed.** Failed installs show the Windows Update error code with a plain-English cause and the usual fix.
 - **Ignore an update.** *Ignore* on the detail window keeps an update listed but stops it colouring the icon or raising notifications.
 - **Since Windows started.** The All Updates window can filter to updates installed since Windows last started, or in the last day, week or month.
@@ -153,7 +154,7 @@ Left- or right-click the icon (left-click is configurable). Top to bottom:
 | Item | What it does |
 |---|---|
 | Header | Time of the last scan and the next one. Shows `Scanning… (3/15)` while working. |
-| Uptime, restart | **Up 17 days** (orange with "consider restarting" past the reminder threshold), and a line when Windows is waiting for a restart. |
+| Uptime, restart | **Up 17 days** (orange with "consider restarting" past the reminder threshold). When Windows is waiting for a restart to finish installing updates, an orange **Windows needs a restart…** item opens a submenu: **Restart Windows now…** (asks first, then a 10 second countdown), restart in 15 minutes, 1 hour or 4 hours, **tonight at 02:00**, and **Cancel scheduled restart**. It uses Windows' own `shutdown.exe`, so Windows shows its usual warning. |
 | Pending | Updates Windows has found but not installed, above the installed list. Drivers with no KB article are listed too. |
 | Update rows | The newest updates (15 by default), newest first. Dot and text are coloured by risk. A tick and dimmed text mean you marked it reviewed; **⬆ fix available** means a fix exists that is not installed here; **changed since reviewed** means Microsoft edited an article you had reviewed. Hover for the first matched issue. Click to open the detail window. |
 | Scan now | Rescans and refreshes updates inside the recent window. |
@@ -405,7 +406,7 @@ Use **Settings, Advanced, Uninstall PatchRadar…**. It asks for confirmation, t
 
 Please use this instead of deleting the exe by hand. Deleting it yourself leaves the start-at-login entry behind, and PatchRadar cannot clean that up because it is no longer there. To do it manually: exit PatchRadar, delete the exe, and remove the `Run` value above. It also removes the two folders in the table if you want to clear your data.
 
-PatchRadar **reads** update history. It installs nothing and never hides updates. The only change it can make to the machine is the optional, administrator-only, audited [uninstall](#uninstalling-an-update-advanced-administrators-only), which is off unless you turn it on.
+PatchRadar **reads** update history. It installs nothing and never hides updates. The only changes it can make to the machine are the optional, administrator-only, audited [uninstall](#uninstalling-an-update-advanced-administrators-only), which is off unless you turn it on, and a restart you ask for from the tray menu when Windows is waiting for one.
 
 ## FAQ and troubleshooting
 
