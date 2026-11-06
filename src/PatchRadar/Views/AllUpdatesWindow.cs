@@ -158,6 +158,14 @@ public sealed class AllUpdatesWindow : Window
         Loaded += async (_, _) => await LoadAsync();
     }
 
+    /// <summary>Used by the <c>--screenshots</c> mode to put the window into a named state.</summary>
+    internal void ApplyForScreenshot(string? symptom, bool rank)
+    {
+        _rank.IsChecked = rank;
+        _symptom.Text = symptom ?? "";
+        Refilter();
+    }
+
     private static bool IsInRow(DependencyObject? d)
     {
         while (d is not null)

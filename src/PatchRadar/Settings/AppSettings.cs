@@ -112,6 +112,8 @@ public sealed class AdvancedSettings : SettingsSection
     public bool EnableWebView2Fallback { get; set; } = true;
     /// <summary>Offer an Uninstall button for removable updates. Administrators only; off by default.</summary>
     public bool EnableUninstall { get; set; }
+    /// <summary>Notice problems in the log and offer to report them on GitHub. Nothing is sent unless the user reviews and clicks through.</summary>
+    public bool OfferProblemReports { get; set; } = true;
 }
 
 public sealed class AppSettings : SettingsSection

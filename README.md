@@ -45,6 +45,7 @@ PatchRadar flags it red, because an improvement that matches a *change phrase* (
 - **Export** the list as CSV, JSON or a Markdown table that pastes cleanly into a ticket. **Copy summary** puts one update's findings on the clipboard.
 - **Notifications** for new red updates, once per update per article revision.
 - **Light, dark or follow-the-system theme, adjustable text size**, and every threshold, keyword and colour is configurable.
+- **Problem reports.** If PatchRadar logs an error with a stack trace, it shows a notice. You see exactly what would be reported (your user name, computer name and personal paths are removed), and a button checks GitHub for an existing issue with the same problem hash and opens it, or opens a pre-filled new issue in your browser. Nothing is sent by PatchRadar itself; you press Submit on GitHub. Turn it off in **Settings, Advanced**. Development builds never offer it.
 - **Self-updating** from GitHub Releases, with checksum verification and automatic rollback. After an update the exe is renamed to the new version (`PatchRadar-v1.2.1-win-x64.exe`), and the run-at-login entry follows it.
 - **Survives a blocked support site.** If `support.microsoft.com` answers 403 or 429, PatchRadar retries with different request styles, then Windows release health, then a hidden browser render. If it still cannot read an article, the detail window says so and that PatchRadar will keep trying.
 - **Links that open on locked-down PCs.** When Windows will not hand a link to the default browser (a managed PC that answers "Access is denied"), PatchRadar tries other ways of opening it and, as a last resort, copies the link to the clipboard and tells you.
@@ -132,7 +133,9 @@ Filter by risk, category, review state and date. Export respects the filter.
 
 Why per-user: the folder is writable without elevation, so the built-in updater can replace the exe in place. In `Program Files` the updater cannot write, so it falls back to telling you a new version exists.
 
-Keep the exe in a folder that stays put (not Downloads, which cleanup tools empty). If the file is moved or deleted by hand, the start-at-login entry is left pointing at nothing. To remove PatchRadar, use [Removing PatchRadar](#removing-patchradar) instead of deleting the file.
+If you run it from your Downloads folder, PatchRadar installs itself to `%LOCALAPPDATA%\PatchRadar\bin\PatchRadar.exe`, tells you, and deletes the downloaded copy, so updates are not lost when Downloads is cleaned. The installed file keeps the name `PatchRadar.exe` through updates, so the start-at-login entry never changes.
+
+Otherwise keep the exe in a folder that stays put (not Downloads, which cleanup tools empty). If the file is moved or deleted by hand, the start-at-login entry is left pointing at nothing. To remove PatchRadar, use [Removing PatchRadar](#removing-patchradar) instead of deleting the file.
 
 When PatchRadar updates itself it renames the file to match the new version, so `PatchRadar-v1.1.0-win-x64.exe` becomes `PatchRadar-v1.2.1-win-x64.exe` and the start-at-login entry is updated to match. A file name with no version in it (for example `PatchRadar.exe`) is kept as it is.
 
@@ -465,6 +468,7 @@ Useful command-line modes:
 |---|---|
 | `PatchRadar.exe --diag out.txt [KB5127648 …] [--webview]` | Headless: times update collection, fetches the KBs live, reports release health and (optionally) WebView2. |
 | `PatchRadar.exe --verify out.txt <file>` | Authenticode verdict for a file. |
+| `PatchRadar.exe --screenshots <folder>` | Developer tool: renders the windows with built-in sample data, light and dark, into PNGs (the images in `docs/images`; the tray menu shot is not included). For your own data use **Create debug screenshots** in the tray menu (hold Shift or Alt). |
 | `tools/test-matrix.ps1 -Exe PatchRadar.exe` | Self-check for a machine in the OS matrix. |
 | `tools/make-icons.ps1` | Regenerates the icons in `assets/`. |
 

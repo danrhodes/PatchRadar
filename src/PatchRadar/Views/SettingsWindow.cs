@@ -74,6 +74,7 @@ public sealed class SettingsWindow : Window
     private readonly ComboBox _logLevel = new() { ItemsSource = Enum.GetNames<Infra.LogLevel>() };
     private readonly CheckBox _releaseHealth = Check("Use Windows release health as a fallback and enrichment source");
     private readonly CheckBox _uninstall = Check("Allow uninstalling updates (administrators only)");
+    private readonly CheckBox _problemReports = Check("Offer to report problems found in the log (you review the text first; nothing is sent automatically)");
     private readonly CheckBox _webView2 = Check("Use a hidden WebView2 render when the support site blocks requests (needs the WebView2 runtime)");
 
     public SettingsWindow(SettingsHost host, ILog log)
@@ -147,6 +148,8 @@ public sealed class SettingsWindow : Window
         tabs.Items.Add(Tab("Advanced", Stack(Row("Log level", _logLevel), _releaseHealth, _webView2,
             _uninstall,
             Label("Shows an Uninstall button on updates that Windows can really remove (the newest cumulative update, standalone updates). It is never shown to standard users, never for servicing stack updates, and every removal asks for confirmation and is recorded with your user name and the time. Off by default."),
+            _problemReports,
+            Label("When PatchRadar logs an error with a stack trace, it can show a notice. You then see the exact text (names and paths removed), and a button opens a pre-filled GitHub issue page in your browser. If the same problem is already reported, it opens that issue instead."),
             MakeButton("Uninstall PatchRadar…", (_, _) => RemoveApp()),
             Label("Removes PatchRadar from this PC: the run-at-login entry and the program file. You can also choose to delete its settings and history. Use this instead of deleting the exe by hand."))));
 
@@ -229,6 +232,7 @@ public sealed class SettingsWindow : Window
         _releaseHealth.IsChecked = s.Advanced.EnableReleaseHealthFallback;
         _webView2.IsChecked = s.Advanced.EnableWebView2Fallback;
         _uninstall.IsChecked = s.Advanced.EnableUninstall;
+        _problemReports.IsChecked = s.Advanced.OfferProblemReports;
     }
 
     private void Save_Click(object sender, RoutedEventArgs e)
@@ -317,6 +321,7 @@ public sealed class SettingsWindow : Window
         s.Advanced.EnableReleaseHealthFallback = _releaseHealth.IsChecked == true;
         s.Advanced.EnableWebView2Fallback = _webView2.IsChecked == true;
         s.Advanced.EnableUninstall = _uninstall.IsChecked == true;
+        s.Advanced.OfferProblemReports = _problemReports.IsChecked == true;
 
         if (errors.Count > 0)
         {

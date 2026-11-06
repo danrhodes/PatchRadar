@@ -17,7 +17,7 @@ using PatchRadar.Views;
 
 namespace PatchRadar.Tray;
 
-public sealed class TrayController : IDisposable
+public sealed partial class TrayController : IDisposable
 {
     private readonly TaskbarIcon _icon;
     private readonly ScanService _scan;
@@ -33,6 +33,10 @@ public sealed class TrayController : IDisposable
     private AllUpdatesWindow? _allWindow;
     private SettingsWindow? _settingsWindow;
     private Action? _toastClick;
+    private readonly List<Control> _advanced = new();
+
+    /// <summary>Set by the app when it can scan the log for problems (not in development builds).</summary>
+    public Action? CheckProblemsNow { get; set; }
 
     private ScanResult _last = ScanResult.Empty;
     private (int Done, int Total)? _progress;
@@ -61,6 +65,7 @@ public sealed class TrayController : IDisposable
     /// <summary>Opening the menu is the user looking: record it and drop the badge.</summary>
     private void OnMenuOpened()
     {
+        SyncAdvanced();
         if (_seen is null) return;
         if (_seen.MarkSeen(_last.Pending.Where(r => !r.Ignored).Select(r => r.Update.Kb))) UpdateIcon();
     }
@@ -85,6 +90,8 @@ public sealed class TrayController : IDisposable
             ToolTipText = "PatchRadar",
             Icon = IconFactory.For(Severity.Grey),
         };
+        _icon.TrayLeftMouseDown += (_, _) => SyncAdvanced();
+        _icon.TrayRightMouseDown += (_, _) => SyncAdvanced();
         _icon.TrayBalloonTipClicked += (_, _) => { var c = _toastClick; _toastClick = null; c?.Invoke(); };
         if (_updates is not null) _updates.Changed += () => Dispatch(Refresh);
         _host.Changed += OnSettingsChanged;
@@ -351,6 +358,7 @@ public sealed class TrayController : IDisposable
         AddItem(menu, "Open log folder", OpenLogFolder);
         AddUpdateItems(menu);
         AddItem(menu, "About", ShowAbout);
+        AddAdvancedItems(menu);
         AddItem(menu, "Exit", () => Application.Current.Shutdown());
         menu.Opened += (_, _) => OnMenuOpened();
         _icon.ContextMenu = menu;
@@ -507,12 +515,15 @@ public sealed class TrayController : IDisposable
         _allWindow.Activate();
     }
 
-    private void ShowBriefing()
+    private void ShowBriefing() => OpenBriefing();
+
+    private BriefingWindow OpenBriefing()
     {
         var md = Briefing.Render(_last.Pending, _restart, DateTime.Now, Environment.MachineName);
         var briefing = new BriefingWindow(_last.Pending, _restart, Environment.MachineName, Settings.Appearance.Colors, md, ShowDetail, _log);
         UiScale.Apply(briefing, Settings.Appearance.FontSize);
         briefing.Show();
+        return briefing;
     }
 
     private void ShowSettings()

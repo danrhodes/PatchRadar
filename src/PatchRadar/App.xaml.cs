@@ -3,6 +3,7 @@ using System.IO;
 using System.Net;
 using System.Text;
 using System.Windows;
+using System.Windows.Media.Imaging;
 using PatchRadar.AppUpdate;
 using PatchRadar.Core;
 using PatchRadar.Infra;
@@ -52,6 +53,16 @@ public partial class App : Application
             return;
         }
 
+        // Developer tool: renders every window with sample data into a folder (README screenshots).
+        var shotsIdx = Array.IndexOf(args, "--screenshots");
+        if (shotsIdx >= 0 && shotsIdx + 1 < args.Length)
+        {
+            try { await ScreenshotRunner.RunAsync(args[shotsIdx + 1]); }
+            catch (Exception ex) { File.WriteAllText(Path.Combine(args[shotsIdx + 1], "screenshots-error.txt"), ex.ToString()); }
+            Shutdown();
+            return;
+        }
+
         // Prints the Authenticode verdict for a file (used on a clean machine before enabling RequireSignatureOnStable).
         var verifyIdx = Array.IndexOf(args, "--verify");
         if (verifyIdx >= 0 && verifyIdx + 2 < args.Length)
@@ -74,6 +85,28 @@ public partial class App : Application
 
         // After a self-update the old process may still be exiting; give it time to release the mutex.
         var postUpdate = args.Contains("--post-update") || args.Contains(CrashRestart.Argument);
+
+        // Run from Downloads: move into AppData so self-updates are not lost when Downloads is cleaned, then delete the download.
+        if (!postUpdate && !args.Contains(SelfInstall.RelocatedArgument)
+            && Environment.ProcessPath is { } self && SelfInstall.ShouldRelocate(self, SelfInstall.DownloadFolders()))
+        {
+            var moved = SelfInstall.Relocate(self, _log);
+            if (moved.Outcome is SelfInstall.Outcome.Relocated or SelfInstall.Outcome.UsedExisting)
+            {
+                MessageBox.Show(
+                    "PatchRadar has installed itself to:\n" + SelfInstall.InstallDirectory +
+                    "\n\nThis downloaded copy will now be deleted, and PatchRadar will keep updating itself from the new location. " +
+                    "You can start it from the tray icon, or it will start with Windows.",
+                    "PatchRadar installed", MessageBoxButton.OK, MessageBoxImage.Information);
+                SelfInstall.RemoveOriginal(self, _log);
+                Shutdown();
+                return;
+            }
+            // Could not move (for example a locked-down profile): carry on from Downloads rather than not start.
+        }
+
+        var relocated = args.Contains(SelfInstall.RelocatedArgument);
+        postUpdate |= relocated;   // the downloaded copy is still exiting: wait for the mutex and stay quiet
         var wait = postUpdate ? TimeSpan.FromSeconds(30) : TimeSpan.Zero;
         try { _single = new SingleInstance(wait: wait); }
         catch (Exception ex)
@@ -162,6 +195,7 @@ public partial class App : Application
         tray = _tray = new TrayController(scan, host, toasts, new DigestStore(state), _updates, _log, uninstall, new PendingSeenStore(state), new RebootReminder(state));
         _tray.Start();
         _updates.Start();
+        StartProblemWatcher(host, tray);
 
         // Tell the user what the last start did.
         if (startup.Action == StartupAction.JustUpdated) _tray.ShowToast("PatchRadar updated", $"Updated to v{startup.Version}.");
@@ -172,6 +206,43 @@ public partial class App : Application
         _healthTimer = new System.Windows.Threading.DispatcherTimer { Interval = UpdateHealth.HealthyAfter };
         _healthTimer.Tick += (_, _) => { _healthTimer.Stop(); health.MarkHealthy(); };
         _healthTimer.Start();
+    }
+
+    /// <summary>Looks through the log now and then for errors and offers (never forces) a GitHub report. Development builds stay quiet.</summary>
+    private void StartProblemWatcher(SettingsHost host, TrayController? tray)
+    {
+        if (_log is null || _githubClient is null) return;
+        var store = new ProblemStore(Path.Combine(Paths.LocalAppData, "problems.json"), _log);
+        var lookup = new ProblemLookup(_githubClient.Get, _log);
+        var os = $"{Environment.OSVersion.Version} ({(Environment.Is64BitOperatingSystem ? "64-bit" : "32-bit")})";
+
+        void OpenReport(ProblemReport report) => Dispatcher.BeginInvoke(() =>
+        {
+            // A screenshot is only offered when a PatchRadar window is already open, and only of that window.
+            BitmapSource? shot = null;
+            if (Windows.OfType<Window>().FirstOrDefault(w => w.IsVisible && w is not ProblemReportWindow) is { } open)
+                try { shot = WindowCapture.ToBitmap(open); } catch (Exception ex) { _log.Warn("Could not capture a window: " + ex.Message); }
+            new ProblemReportWindow(report, lookup, store, _log, shot).Show();
+        });
+
+        var watcher = new ProblemWatcher(FileLog.DefaultDirectory, store, () => host.Current.Advanced.OfferProblemReports,
+            (title, msg, click) => tray?.ShowToast(title, msg, click), OpenReport,
+            $"{AppVersion.Running()} ({AppVersion.Flavour()})", os, _log);
+
+        // Advanced menu (Shift or Alt): scan the log now and open the newest error for review, in any build.
+        if (tray is not null)
+            tray.CheckProblemsNow = () =>
+            {
+                var found = watcher.Groups(DateTime.UtcNow);
+                if (found.Count == 0) tray.ShowToast("PatchRadar", "No errors with a stack trace in the last 7 days of logs.");
+                else if (found.Count == 1) OpenReport(found[0].Report);
+                else new ProblemListWindow(found, OpenReport).Show();
+            };
+
+        if (AppVersion.Running().IsDevBuild) return;      // the automatic check stays off in development builds
+        var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(90) };
+        timer.Tick += (_, _) => { timer.Interval = TimeSpan.FromHours(6); watcher.CheckNow(DateTime.UtcNow); };
+        timer.Start();
     }
 
     private static void SaveSkipped(SettingsHost host, string version)

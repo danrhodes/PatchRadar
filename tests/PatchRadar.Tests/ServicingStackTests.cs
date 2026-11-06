@@ -22,6 +22,14 @@ public class ServicingStackTests
         Assert.Equal("KB5127648", parent);
     }
 
+    [Theory]
+    [InlineData("Servicing stack update (SSU) Includes KB5124009 (Build 26100.9539), which improves")]
+    [InlineData("Component updates Windows 11 servicing stack update (KB5124009) - 22621.9441 This update")]
+    [InlineData("download the file information for SSU KB5124009 - versions 22621.9441.")]
+    [InlineData("download the file information for the SSU (KB5124009) - version 26100.9539.")]
+    public void RecognisesEachWordingOfTheSsuReference(string text) =>
+        Assert.Equal("KB5124009", ServicingStackLinker.IncludedSsu(text));
+
     [Fact]
     public void NoParentWhenNoArticleMentionsIt() =>
         Assert.Null(ServicingStackLinker.ParentOf("KB5127647", new[] { ("KB5127648", (string?)"Includes KB1 only"), ("KB2", null) }));
