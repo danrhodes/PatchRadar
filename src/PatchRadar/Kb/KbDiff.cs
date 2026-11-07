@@ -85,6 +85,9 @@ public static class KbDiff
 
     // ---- known issues: matched by title (or, for untitled ones, by the start of the symptom) ----------------
 
+    /// <summary>The stable identity of an issue across edits of the article.</summary>
+    public static string KeyOf(KbIssue i) => IssueKey(i);
+
     private static string IssueKey(KbIssue i) => Norm(string.IsNullOrWhiteSpace(i.Title) ? Cut(i.Symptom, 60) : i.Title!);
 
     private static void CompareIssues(IReadOnlyList<KbIssue> oldList, IReadOnlyList<KbIssue> newList, List<KbChange> changes)

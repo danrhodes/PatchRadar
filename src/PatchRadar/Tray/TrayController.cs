@@ -25,6 +25,8 @@ public sealed partial class TrayController : IDisposable
     private readonly SettingsHost _host;
     private readonly ToastTracker _toasts;
     private readonly DigestStore _digest;
+    private readonly WatchStore? _watch;
+    private SymptomWindow? _symptomWindow;
     private readonly UninstallService? _uninstall;
     private DigestWindow? _digestWindow;
     private readonly UpdateCoordinator? _updates;
@@ -72,8 +74,9 @@ public sealed partial class TrayController : IDisposable
 
     private AppSettings Settings => _host.Current;
 
-    public TrayController(ScanService scan, SettingsHost host, ToastTracker toasts, DigestStore digest, UpdateCoordinator? updates, ILog log, UninstallService? uninstall = null, PendingSeenStore? seen = null, RebootReminder? reboot = null)
+    public TrayController(ScanService scan, SettingsHost host, ToastTracker toasts, DigestStore digest, UpdateCoordinator? updates, ILog log, UninstallService? uninstall = null, PendingSeenStore? seen = null, RebootReminder? reboot = null, WatchStore? watch = null)
     {
+        _watch = watch;
         _seen = seen;
         _reboot = reboot;
         _uninstall = uninstall;
@@ -160,7 +163,7 @@ public sealed partial class TrayController : IDisposable
             var result = await Task.Run(() => _scan.ScanAsync(force, new DispatcherProgress(p => Dispatch(() => { _progress = p; Refresh(); })), CancellationToken.None));
             _last = result;
             _log.Info($"Scan complete: {result.Rows.Count} rows, {result.Fetched} fetched, {result.Failed} failed");
-            Dispatch(() => { NotifyNewRed(result); NotifyPendingRed(result); });
+            Dispatch(() => { NotifyNewRed(result); NotifyPendingRed(result); NotifyFixes(result); });
         }
         catch (Exception ex) { _log.Error("Scan failed", ex); }
         finally
@@ -216,6 +219,22 @@ public sealed partial class TrayController : IDisposable
             }
         }
         catch (Exception ex) { _log.Error("Toast failed", ex); }
+    }
+
+    /// <summary>Watched updates whose open issues now have a fix or workaround. Always toasted: the user asked to be told.</summary>
+    private void NotifyFixes(ScanResult result)
+    {
+        try
+        {
+            if (_watch is null) return;
+            foreach (var a in _watch.TakeAlerts(result.Pending.Concat(result.Rows)))
+            {
+                var row = a.Row;
+                ShowToast($"Fix published for {row.Update.Label}", string.Join("; ", a.Lines.Take(2)), () => ShowDetail(row));
+                _log.Info($"Watch fired for {row.Update.Kb}: {string.Join("; ", a.Lines)}");
+            }
+        }
+        catch (Exception ex) { _log.Error("Fix watch failed", ex); }
     }
 
     public void ShowToast(string title, string message, Action? onClick = null)
@@ -337,6 +356,8 @@ public sealed partial class TrayController : IDisposable
         var changes = DigestItems();
         var changedCount = changes.Select(c => c.Row.Update.Kb).Distinct().Count();
         AddItem(menu, changedCount > 0 ? $"What's changed ({changedCount})…" : "What's changed…", ShowDigest);
+
+        AddItem(menu, "Something broke? Find the update…", ShowSymptom);
 
         var export = new MenuItem { Header = "Export…" };
         void AddExport(string text, Action click)
@@ -481,7 +502,8 @@ public sealed partial class TrayController : IDisposable
             existing.Activate();
             return;
         }
-        var win = new DetailWindow(row, Settings.Appearance.Colors, RefreshRowAsync, SetReviewed, _scan.IsInstalled, _log, _uninstall, () => _ = RunScanAsync(force: true), SetIgnored, ShowDetailByKb);
+        var win = new DetailWindow(row, Settings.Appearance.Colors, RefreshRowAsync, SetReviewed, _scan.IsInstalled, _log, _uninstall, () => _ = RunScanAsync(force: true), SetIgnored, ShowDetailByKb,
+            _watch is null ? null : r => _watch.IsWatched(r.Update.Kb), _watch is null ? null : SetWatched);
         _details[row.Update.Kb] = win;
         win.Closed += (_, _) => _details.Remove(row.Update.Kb);
         UiScale.Apply(win, Settings.Appearance.FontSize);
@@ -540,6 +562,24 @@ public sealed partial class TrayController : IDisposable
     {
         UpdateRow Swap(UpdateRow r) => r.Update.Kb == updated.Update.Kb ? updated : r;
         _last = _last with { Rows = _last.Rows.Select(Swap).ToList(), Pending = _last.Pending.Select(Swap).ToList() };
+    }
+
+    private bool SetWatched(UpdateRow row, bool watch)
+    {
+        if (_watch is null) return false;
+        if (watch) return _watch.Watch(row.Update.Kb, row.Kb);
+        _watch.Unwatch(row.Update.Kb);
+        return false;
+    }
+
+    private void ShowSymptom()
+    {
+        if (_symptomWindow is { IsLoaded: true }) { _symptomWindow.Activate(); return; }
+        _symptomWindow = new SymptomWindow(() => _last.Rows, Settings.Appearance.Colors, ShowDetail);
+        _symptomWindow.Closed += (_, _) => _symptomWindow = null;
+        UiScale.Apply(_symptomWindow, Settings.Appearance.FontSize);
+        _symptomWindow.Show();
+        _symptomWindow.Activate();
     }
 
     private UpdateRow SetIgnored(UpdateRow row, bool ignored)

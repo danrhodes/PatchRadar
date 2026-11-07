@@ -86,16 +86,18 @@ public partial class App : Application
         // After a self-update the old process may still be exiting; give it time to release the mutex.
         var postUpdate = args.Contains("--post-update") || args.Contains(CrashRestart.Argument);
 
-        // Run from Downloads: move into AppData so self-updates are not lost when Downloads is cleaned, then delete the download.
-        if (!postUpdate && !args.Contains(SelfInstall.RelocatedArgument)
-            && Environment.ProcessPath is { } self && SelfInstall.ShouldRelocate(self, SelfInstall.DownloadFolders()))
+        // Run from anywhere else: install into AppData (or --customdir) so self-updates have a stable home, then delete the download.
+        var customDir = SelfInstall.ParseCustomDir(args);
+        if (!postUpdate && !args.Contains(SelfInstall.RelocatedArgument) && !System.Diagnostics.Debugger.IsAttached
+            && Environment.ProcessPath is { } self
+            && SelfInstall.ShouldRelocate(self, customDir, customDir is null ? SelfInstall.ReadSavedCustomDir() : null))
         {
-            var moved = SelfInstall.Relocate(self, _log);
+            var moved = SelfInstall.Relocate(self, customDir, _log);
             if (moved.Outcome is SelfInstall.Outcome.Relocated or SelfInstall.Outcome.UsedExisting)
             {
                 MessageBox.Show(
-                    "PatchRadar has installed itself to:\n" + SelfInstall.InstallDirectory +
-                    "\n\nThis downloaded copy will now be deleted, and PatchRadar will keep updating itself from the new location. " +
+                    "PatchRadar has installed itself to:\n" + SelfInstall.TargetDirectory(customDir) +
+                    "\n\nThe original copy will now be deleted, and PatchRadar will keep updating itself from the new location. " +
                     "You can start it from the tray icon, or it will start with Windows.",
                     "PatchRadar installed", MessageBoxButton.OK, MessageBoxImage.Information);
                 SelfInstall.RemoveOriginal(self, _log);
@@ -192,7 +194,7 @@ public partial class App : Application
 
         var uninstall = new UninstallService(new UninstallPlanner(new RegistryCbsPackageSource()), new UacRunner(), new WindowsPrivilegeInfo(),
             new UninstallAudit(Paths.UninstallAuditFile, _log), () => host.Current, () => scan.InstalledUpdates, _log);
-        tray = _tray = new TrayController(scan, host, toasts, new DigestStore(state), _updates, _log, uninstall, new PendingSeenStore(state), new RebootReminder(state));
+        tray = _tray = new TrayController(scan, host, toasts, new DigestStore(state), _updates, _log, uninstall, new PendingSeenStore(state), new RebootReminder(state), new WatchStore(state));
         _tray.Start();
         _updates.Start();
         StartProblemWatcher(host, tray);

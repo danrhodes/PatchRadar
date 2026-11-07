@@ -5,33 +5,38 @@ namespace PatchRadar.Tests;
 
 public class SelfInstallTests
 {
-    private static readonly string[] Dl = { @"C:\Users\a\Downloads" };
-
-    [Fact]
-    public void Exe_in_downloads_relocates()
-        => Assert.True(SelfInstall.ShouldRelocate(@"C:\Users\a\Downloads\PatchRadar-v1.2.1-win-x64.exe", Dl));
-
-    [Fact]
-    public void Exe_in_downloads_subfolder_relocates()
-        => Assert.True(SelfInstall.ShouldRelocate(@"C:\Users\a\Downloads\unzipped\PatchRadar.exe", Dl));
-
-    [Fact]
-    public void Exe_elsewhere_stays()
-        => Assert.False(SelfInstall.ShouldRelocate(@"C:\Tools\PatchRadar.exe", Dl));
-
-    [Fact]
-    public void Sibling_folder_with_same_prefix_is_not_downloads()
-        => Assert.False(SelfInstall.ShouldRelocate(@"C:\Users\a\Downloads2\PatchRadar.exe", Dl));
+    [Theory]
+    [InlineData(@"C:\Users\a\Downloads\PatchRadar-v1.2.1-win-x64.exe")]
+    [InlineData(@"C:\Users\a\Desktop\PatchRadar.exe")]
+    [InlineData(@"C:\Tools\PatchRadar.exe")]
+    public void Exe_outside_install_folder_relocates(string path)
+        => Assert.True(SelfInstall.ShouldRelocate(path));
 
     [Fact]
     public void Installed_copy_never_relocates()
-        => Assert.False(SelfInstall.ShouldRelocate(SelfInstall.InstalledPath, new[] { Paths.LocalAppData }));
+        => Assert.False(SelfInstall.ShouldRelocate(SelfInstall.InstalledPath));
 
     [Fact]
     public void Host_exe_is_never_moved()
-        => Assert.False(SelfInstall.ShouldRelocate(@"C:\Users\a\Downloads\dotnet.exe", Dl));
+        => Assert.False(SelfInstall.ShouldRelocate(@"C:\Users\a\Downloads\dotnet.exe"));
 
     [Fact]
-    public void Missing_folder_is_ignored()
-        => Assert.False(SelfInstall.ShouldRelocate(@"C:\Users\a\Downloads\PatchRadar.exe", new string?[] { null, "" }));
+    public void Custom_dir_requests_move_there()
+        => Assert.True(SelfInstall.ShouldRelocate(@"C:\Users\a\Downloads\PatchRadar.exe", @"D:\Apps\PR"));
+
+    [Fact]
+    public void Already_in_custom_dir_stays()
+        => Assert.False(SelfInstall.ShouldRelocate(@"D:\Apps\PR\PatchRadar.exe", @"D:\Apps\PR"));
+
+    [Fact]
+    public void Remembered_custom_dir_is_respected()
+        => Assert.False(SelfInstall.ShouldRelocate(@"D:\Apps\PR\PatchRadar.exe", null, @"D:\Apps\PR"));
+
+    [Fact]
+    public void Parses_customdir_argument()
+    {
+        Assert.Equal(@"D:\Apps\PR", SelfInstall.ParseCustomDir(new[] { "--customdir", @"D:\Apps\PR" }));
+        Assert.Null(SelfInstall.ParseCustomDir(new[] { "--customdir" }));
+        Assert.Null(SelfInstall.ParseCustomDir(Array.Empty<string>()));
+    }
 }

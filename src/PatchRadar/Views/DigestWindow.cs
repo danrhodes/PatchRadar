@@ -59,12 +59,21 @@ public sealed class DigestWindow : Window
                 {
                     var changes = new StackPanel { Margin = new Thickness(4, 4, 0, 0) };
                     foreach (var c in d.Changes)
+                    {
+                        var detail = new StackPanel();
+                        detail.Children.Add(new TextBlock { Text = $"{Sign(c.Kind)} {c.Area}: {Shorten(c.Title, 140)}", TextWrapping = TextWrapping.Wrap, FontWeight = FontWeights.SemiBold });
+                        // Show the wording that moved, so there is no need to reopen the article to see what Microsoft changed.
+                        foreach (var f in c.Fields ?? Array.Empty<FieldChange>())
+                            detail.Children.Add(Moved(f.Field, f.Before, f.After));
+                        if (c.Kind == ChangeKind.Changed && c.Fields is null) detail.Children.Add(Moved("Text", c.Before ?? "", c.After ?? ""));
+                        else if (c.Kind == ChangeKind.Added && c.After is { Length: > 0 }) detail.Children.Add(Moved("Now says", "", c.After));
+                        else if (c.Kind == ChangeKind.Removed && c.Before is { Length: > 0 }) detail.Children.Add(Moved("Used to say", c.Before, ""));
                         changes.Children.Add(new Border
                         {
                             BorderBrush = ChangeBrush(c.Kind, colours), BorderThickness = new Thickness(2, 0, 0, 0),
-                            Padding = new Thickness(8, 1, 4, 1), Margin = new Thickness(0, 0, 0, 5),
-                            Child = new TextBlock { Text = $"{Sign(c.Kind)} {c.Area}: {Shorten(c.Title, 140)}", TextWrapping = TextWrapping.Wrap },
+                            Padding = new Thickness(8, 1, 4, 1), Margin = new Thickness(0, 0, 0, 5), Child = detail,
                         });
+                    }
                     card.Children.Add(new Expander
                     {
                         Header = new TextBlock { Text = $"What changed in the article ({d.Changes.Count})", FontSize = 12, FontWeight = FontWeights.SemiBold },
@@ -97,6 +106,18 @@ public sealed class DigestWindow : Window
         root.Children.Add(buttons);
         root.Children.Add(new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = list });
         Content = root;
+    }
+
+    private static UIElement Moved(string field, string before, string after)
+    {
+        var t = new TextBlock { TextWrapping = TextWrapping.Wrap, FontSize = 12, Margin = new Thickness(8, 1, 0, 0), Opacity = 0.9 };
+        t.Inlines.Add(new System.Windows.Documents.Run(field + ": ") { FontWeight = FontWeights.SemiBold });
+        if (before.Length > 0)
+            t.Inlines.Add(new System.Windows.Documents.Run(Shorten(before, 220)) { TextDecorations = System.Windows.TextDecorations.Strikethrough, Foreground = Brushes.Gray });
+        if (before.Length > 0 && after.Length > 0) t.Inlines.Add(new System.Windows.Documents.Run("  →  "));
+        if (after.Length > 0) t.Inlines.Add(new System.Windows.Documents.Run(Shorten(after, 220)));
+        if (before.Length == 0 && after.Length == 0) t.Inlines.Add(new System.Windows.Documents.Run("(empty)"));
+        return t;
     }
 
     private static Brush ChangeBrush(ChangeKind k, ColorSettings c) =>

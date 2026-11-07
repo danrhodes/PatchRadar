@@ -22,6 +22,8 @@ public partial class DetailWindow : Window
     private readonly Func<UpdateRow, bool, UpdateRow> _setReviewed;
     private readonly Func<string, bool> _isInstalled;
     private readonly Func<UpdateRow, bool, UpdateRow>? _setIgnored;
+    private readonly Func<UpdateRow, bool>? _isWatched;
+    private readonly Func<UpdateRow, bool, bool>? _setWatched;
     private readonly UninstallService? _uninstall;
     private readonly Action<string>? _openKb;
     private readonly Action? _onUninstalled;
@@ -32,9 +34,12 @@ public partial class DetailWindow : Window
 
     public DetailWindow(UpdateRow row, ColorSettings colors, Func<UpdateRow, Task<UpdateRow?>> refresh,
         Func<UpdateRow, bool, UpdateRow> setReviewed, Func<string, bool> isInstalled, ILog log,
-        UninstallService? uninstall = null, Action? onUninstalled = null, Func<UpdateRow, bool, UpdateRow>? setIgnored = null, Action<string>? openKb = null)
+        UninstallService? uninstall = null, Action? onUninstalled = null, Func<UpdateRow, bool, UpdateRow>? setIgnored = null, Action<string>? openKb = null,
+        Func<UpdateRow, bool>? isWatched = null, Func<UpdateRow, bool, bool>? setWatched = null)
     {
         InitializeComponent();
+        _isWatched = isWatched;
+        _setWatched = setWatched;
         _setIgnored = setIgnored;
         _openKb = openKb;
         _row = row;
@@ -124,6 +129,14 @@ public partial class DetailWindow : Window
         IgnoreButton.Visibility = _setIgnored is null ? Visibility.Collapsed : Visibility.Visible;
         if (_row.Ignored)
             Body.Children.Add(Text("Ignored: this update stays listed but does not colour the tray icon or raise notifications.", 11, null, Brushes.Gray, new Thickness(0, 4, 0, 0)));
+
+        // "Wait for a fix": offered only while some known issue has nothing published yet (or while already watching).
+        var watched = _isWatched?.Invoke(_row) == true;
+        WatchButton.Content = watched ? "Stop watching" : "Watch for a fix";
+        WatchButton.Visibility = _setWatched is not null && (watched || PatchRadar.State.WatchStore.OpenIssues(_row.Kb).Count > 0)
+            ? Visibility.Visible : Visibility.Collapsed;
+        if (watched)
+            Body.Children.Add(Text("Watching: you will get a notification when Microsoft publishes a fix or workaround for this update's open issues.", 11, null, Brushes.Gray, new Thickness(0, 4, 0, 0)));
 
         // A reviewed update whose article has since changed must not look settled.
         ReviewButton.Content = _row.Review == ReviewStatus.None ? "Mark reviewed" : "Mark not reviewed";
@@ -628,6 +641,13 @@ public partial class DetailWindow : Window
     {
         try { Update(_setReviewed(_row, _row.Review == ReviewStatus.None)); }
         catch (Exception ex) { _log.Error("Mark reviewed failed", ex); }
+    }
+
+    private void Watch_Click(object sender, RoutedEventArgs e)
+    {
+        if (_setWatched is null) return;
+        try { _setWatched(_row, _isWatched?.Invoke(_row) != true); Update(_row); }
+        catch (Exception ex) { _log.Error("Watch failed", ex); }
     }
 
     private void Ignore_Click(object sender, RoutedEventArgs e)

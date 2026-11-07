@@ -1,20 +1,48 @@
 using System.Diagnostics;
 using System.IO;
-using System.Runtime.InteropServices;
 
 namespace PatchRadar.Infra;
 
 /// <summary>
-/// A copy run from the Downloads folder moves itself into %LocalAppData%\PatchRadar\bin and removes the download,
-/// so self-updates are written somewhere that survives a Downloads clean-up.
+/// Wherever PatchRadar is run from, it moves itself into %LocalAppData%\PatchRadarin and removes the original,
+/// so self-updates are written somewhere stable. "--customdir &lt;path&gt;" installs to that folder instead, and the
+/// choice is remembered so later launches from there are left alone.
 /// </summary>
 public static class SelfInstall
 {
     public const string RelocatedArgument = "--relocated";
+    public const string CustomDirArgument = "--customdir";
     public const string InstalledFileName = "PatchRadar.exe";
 
     public static string InstallDirectory => Path.Combine(Paths.LocalAppData, "bin");
     public static string InstalledPath => Path.Combine(InstallDirectory, InstalledFileName);
+    public static string CustomDirMarker => Path.Combine(Paths.LocalAppData, "customdir.txt");
+
+    /// <summary>The folder after --customdir (quotes allowed), or null when not given.</summary>
+    public static string? ParseCustomDir(string[] args)
+    {
+        var i = Array.FindIndex(args, a => string.Equals(a, CustomDirArgument, StringComparison.OrdinalIgnoreCase));
+        if (i < 0 || i + 1 >= args.Length) return null;
+        var v = args[i + 1].Trim().Trim('"');
+        return v.Length == 0 ? null : v;
+    }
+
+    public static string? ReadSavedCustomDir()
+    {
+        try { return File.Exists(CustomDirMarker) ? File.ReadAllText(CustomDirMarker).Trim() : null; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
+    }
+
+    private static void SaveCustomDir(string? dir)
+    {
+        try
+        {
+            Directory.CreateDirectory(Paths.LocalAppData);
+            if (dir is null) { if (File.Exists(CustomDirMarker)) File.Delete(CustomDirMarker); }
+            else File.WriteAllText(CustomDirMarker, dir);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* best effort */ }
+    }
 
     /// <summary>True when <paramref name="path"/> is inside <paramref name="folder"/> (any depth).</summary>
     public static bool IsUnder(string path, string? folder)
@@ -29,21 +57,21 @@ public static class SelfInstall
         catch (NotSupportedException) { return false; }
     }
 
-    /// <summary>Only a real PatchRadar exe inside Downloads qualifies; dotnet.exe under "dotnet run" never does.</summary>
-    public static bool ShouldRelocate(string? exePath, IEnumerable<string?> downloadFolders)
+    /// <summary>
+    /// Any real PatchRadar exe outside its install folder qualifies; dotnet.exe under "dotnet run" never does.
+    /// <paramref name="customDir"/> is the --customdir request; <paramref name="savedCustomDir"/> is a remembered earlier choice.
+    /// </summary>
+    public static bool ShouldRelocate(string? exePath, string? customDir = null, string? savedCustomDir = null)
     {
         if (string.IsNullOrEmpty(exePath)) return false;
         if (!Path.GetFileName(exePath).StartsWith("PatchRadar", StringComparison.OrdinalIgnoreCase)) return false;
+        if (customDir is not null) return !IsUnder(exePath, customDir);
         if (IsUnder(exePath, InstallDirectory)) return false;
-        return downloadFolders.Any(f => IsUnder(exePath, f));
+        return !IsUnder(exePath, savedCustomDir);
     }
 
-    /// <summary>The user's Downloads folder (honours a moved folder) plus the default under the profile.</summary>
-    public static IEnumerable<string?> DownloadFolders()
-    {
-        yield return KnownDownloads();
-        yield return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
-    }
+    /// <summary>Where the exe should live: the custom folder when requested, otherwise the AppData folder.</summary>
+    public static string TargetDirectory(string? customDir) => customDir is null ? InstallDirectory : Path.GetFullPath(customDir);
 
     public enum Outcome { NotNeeded, Relocated, UsedExisting, Failed }
 
@@ -53,12 +81,13 @@ public static class SelfInstall
     /// Copies the exe into the install directory and starts it. An already installed copy that is the same or newer is kept.
     /// The caller shows the alert, then calls <see cref="RemoveOriginal"/> and ends the process.
     /// </summary>
-    public static Result Relocate(string exePath, ILog? log = null)
+    public static Result Relocate(string exePath, string? customDir = null, ILog? log = null)
     {
         try
         {
-            Directory.CreateDirectory(InstallDirectory);
-            var target = InstalledPath;
+            var dir = TargetDirectory(customDir);
+            Directory.CreateDirectory(dir);
+            var target = Path.Combine(dir, InstalledFileName);
             var useExisting = false;
             if (File.Exists(target))
             {
@@ -71,13 +100,14 @@ public static class SelfInstall
             }
             else File.Copy(exePath, target);
 
+            SaveCustomDir(customDir is null ? null : dir);
             Process.Start(new ProcessStartInfo(target, $"{RelocatedArgument} \"{exePath}\"") { UseShellExecute = false });
             log?.Info($"Relocated from {exePath} to {target} (existing kept: {useExisting})");
             return new Result(useExisting ? Outcome.UsedExisting : Outcome.Relocated, target);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
         {
-            log?.Error("Could not move PatchRadar out of Downloads; running from there", ex);
+            log?.Error("Could not install PatchRadar to the target folder; running from where it is", ex);
             return new Result(Outcome.Failed, null, ex.Message);
         }
     }
@@ -102,18 +132,4 @@ public static class SelfInstall
         try { return System.Version.TryParse(FileVersionInfo.GetVersionInfo(path).FileVersion, out var v) ? v : new Version(0, 0); }
         catch (Exception ex) when (ex is IOException or FileNotFoundException) { return new Version(0, 0); }
     }
-
-    private static string? KnownDownloads()
-    {
-        try
-        {
-            var id = new Guid("374DE290-123F-4565-9164-39C4925E467B");
-            if (SHGetKnownFolderPath(ref id, 0, IntPtr.Zero, out var p) != 0) return null;
-            try { return Marshal.PtrToStringUni(p); } finally { Marshal.FreeCoTaskMem(p); }
-        }
-        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException) { return null; }
-    }
-
-    [DllImport("shell32.dll")]
-    private static extern int SHGetKnownFolderPath(ref Guid rfid, uint flags, IntPtr token, out IntPtr path);
 }

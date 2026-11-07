@@ -28,6 +28,9 @@ public sealed class AppState
     /// <summary>Pending updates the user has already looked at, so the tray badge only flags new ones.</summary>
     public Dictionary<string, DateTime> PendingSeen { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>KB -> "tell me when a fix is published" watch.</summary>
+    public Dictionary<string, WatchEntry> Watched { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>When the last restart reminder was shown.</summary>
     public DateTime? LastRebootReminderUtc { get; set; }
 
@@ -82,6 +85,7 @@ public sealed class StateStore
             s.Notified = new Dictionary<string, string>(s.Notified, StringComparer.OrdinalIgnoreCase);
             s.Reviewed = new Dictionary<string, ReviewEntry>(s.Reviewed, StringComparer.OrdinalIgnoreCase);
             s.Ignored = new Dictionary<string, IgnoreEntry>(s.Ignored ?? new(), StringComparer.OrdinalIgnoreCase);
+            s.Watched = new Dictionary<string, WatchEntry>(s.Watched ?? new(), StringComparer.OrdinalIgnoreCase);
             s.PendingSeen = new Dictionary<string, DateTime>(s.PendingSeen ?? new(), StringComparer.OrdinalIgnoreCase);
             return s;
         }
