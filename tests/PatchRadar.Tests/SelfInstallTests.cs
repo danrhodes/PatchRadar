@@ -33,6 +33,31 @@ public class SelfInstallTests
         => Assert.False(SelfInstall.ShouldRelocate(@"D:\Apps\PR\PatchRadar.exe", null, @"D:\Apps\PR"));
 
     [Fact]
+    public void Versioned_name_in_tools_folder_moves_to_appdata()
+        => Assert.True(SelfInstall.ShouldRelocate(@"C:\tools\PatchRadar-v1.2.1-win-x64.exe"));
+
+    [Fact]
+    public void Versioned_name_in_custom_dir_is_renamed_in_place()
+    {
+        Assert.True(SelfInstall.ShouldRelocate(@"D:\Apps\PR\PatchRadar-v1.2.1-win-x64.exe", null, @"D:\Apps\PR"));
+        Assert.Equal(@"D:\Apps\PR", SelfInstall.EffectiveCustomDir(@"D:\Apps\PR\PatchRadar-v1.2.1-win-x64.exe", null, @"D:\Apps\PR"));
+        Assert.Null(SelfInstall.EffectiveCustomDir(@"C:\tools\PatchRadar.exe", null, @"D:\Apps\PR"));
+    }
+
+    [Fact]
+    public void Development_build_output_is_never_moved()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "pr-dev-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            File.WriteAllText(Path.Combine(dir, "PatchRadar.dll"), "");
+            Assert.False(SelfInstall.ShouldRelocate(Path.Combine(dir, "PatchRadar.exe")));
+        }
+        finally { Directory.Delete(dir, true); }
+    }
+
+    [Fact]
     public void Parses_customdir_argument()
     {
         Assert.Equal(@"D:\Apps\PR", SelfInstall.ParseCustomDir(new[] { "--customdir", @"D:\Apps\PR" }));

@@ -26,6 +26,7 @@ public sealed partial class TrayController : IDisposable
     private readonly ToastTracker _toasts;
     private readonly DigestStore _digest;
     private readonly WatchStore? _watch;
+    private readonly StateStore? _state;
     private SymptomWindow? _symptomWindow;
     private readonly UninstallService? _uninstall;
     private DigestWindow? _digestWindow;
@@ -74,8 +75,9 @@ public sealed partial class TrayController : IDisposable
 
     private AppSettings Settings => _host.Current;
 
-    public TrayController(ScanService scan, SettingsHost host, ToastTracker toasts, DigestStore digest, UpdateCoordinator? updates, ILog log, UninstallService? uninstall = null, PendingSeenStore? seen = null, RebootReminder? reboot = null, WatchStore? watch = null)
+    public TrayController(ScanService scan, SettingsHost host, ToastTracker toasts, DigestStore digest, UpdateCoordinator? updates, ILog log, UninstallService? uninstall = null, PendingSeenStore? seen = null, RebootReminder? reboot = null, WatchStore? watch = null, StateStore? state = null)
     {
+        _state = state;
         _watch = watch;
         _seen = seen;
         _reboot = reboot;
@@ -163,7 +165,7 @@ public sealed partial class TrayController : IDisposable
             var result = await Task.Run(() => _scan.ScanAsync(force, new DispatcherProgress(p => Dispatch(() => { _progress = p; Refresh(); })), CancellationToken.None));
             _last = result;
             _log.Info($"Scan complete: {result.Rows.Count} rows, {result.Fetched} fetched, {result.Failed} failed");
-            Dispatch(() => { NotifyNewRed(result); NotifyPendingRed(result); NotifyFixes(result); });
+            Dispatch(() => { NotifyNewRed(result); NotifyPendingRed(result); NotifyFixes(result); _ = NotifyReleasePinAsync(); });
         }
         catch (Exception ex) { _log.Error("Scan failed", ex); }
         finally
@@ -235,6 +237,49 @@ public sealed partial class TrayController : IDisposable
             }
         }
         catch (Exception ex) { _log.Error("Fix watch failed", ex); }
+    }
+
+    /// <summary>Asks whether Microsoft has published a status page for a Windows 11 release (so the release is out). Throws when it cannot tell.</summary>
+    public Func<string, CancellationToken, Task<bool>>? ReleaseExists { get; set; }
+
+    private DateTime _pinCheckedUtc;
+    private string? _pinNewest;
+
+    /// <summary>
+    /// A Windows Update release pin that holds the PC behind a release that is out can hide newer updates. Logged every
+    /// scan, shown to the user once per distinct pin and release so it does not nag. Silent when it cannot tell.
+    /// </summary>
+    private async Task NotifyReleasePinAsync()
+    {
+        try
+        {
+            var build = Environment.OSVersion.Version.Build;
+            var pinned = ReleasePin.ReadPinnedRelease();
+            var running = ReleasePin.RunningRelease(build);
+            if (pinned is null || running is null || ReleasePin.Rank(pinned) < 0) return;
+
+            string? newest;
+            if (ReleasePin.IsOutdated(build, pinned)) newest = running;   // the PC runs a newer release than the pin: proof enough
+            else if (ReleasePin.Rank(pinned) > ReleasePin.Rank(running) || ReleaseExists is null) return;   // pinned ahead = an upgrade is coming
+            else
+            {
+                if (DateTime.UtcNow - _pinCheckedUtc > TimeSpan.FromHours(24))
+                {
+                    _pinNewest = await ReleasePin.NewestAfterAsync(pinned, r => ReleaseExists(r, CancellationToken.None)).ConfigureAwait(true);
+                    _pinCheckedUtc = DateTime.UtcNow;
+                }
+                newest = _pinNewest;
+            }
+            if (newest is null) return;
+
+            _log.Warn($"Windows Update is pinned to {pinned} by policy but {newest} is out (this PC runs {running}, build {build}); newer updates may not be offered");
+            var key = $"release-pin:{pinned}->{newest}";
+            var first = false;
+            _state?.Update(s => { if (!s.PolicyNotices.ContainsKey(key)) { s.PolicyNotices[key] = DateTime.UtcNow; first = true; } });
+            if (!first) return;
+            MessageBox.Show(ReleasePin.Message(build, pinned, newest), "PatchRadar: update policy is out of date", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        catch (Exception ex) { _log.Warn("Release pin check skipped: " + ex.Message); }   // offline or Microsoft unreachable: say nothing
     }
 
     public void ShowToast(string title, string message, Action? onClick = null)

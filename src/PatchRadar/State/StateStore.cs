@@ -31,6 +31,9 @@ public sealed class AppState
     /// <summary>KB -> "tell me when a fix is published" watch.</summary>
     public Dictionary<string, WatchEntry> Watched { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>Policy problems the user has already been told about (key = what was found), so the popup shows once.</summary>
+    public Dictionary<string, DateTime> PolicyNotices { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>When the last restart reminder was shown.</summary>
     public DateTime? LastRebootReminderUtc { get; set; }
 
@@ -86,6 +89,7 @@ public sealed class StateStore
             s.Reviewed = new Dictionary<string, ReviewEntry>(s.Reviewed, StringComparer.OrdinalIgnoreCase);
             s.Ignored = new Dictionary<string, IgnoreEntry>(s.Ignored ?? new(), StringComparer.OrdinalIgnoreCase);
             s.Watched = new Dictionary<string, WatchEntry>(s.Watched ?? new(), StringComparer.OrdinalIgnoreCase);
+            s.PolicyNotices = new Dictionary<string, DateTime>(s.PolicyNotices ?? new(), StringComparer.OrdinalIgnoreCase);
             s.PendingSeen = new Dictionary<string, DateTime>(s.PendingSeen ?? new(), StringComparer.OrdinalIgnoreCase);
             return s;
         }

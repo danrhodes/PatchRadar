@@ -50,6 +50,8 @@ public sealed class Autostart(IRunKey key, string exePath, ILog? log = null)
         {
             if (enabled)
             {
+                // Hosted by dotnet.exe ("dotnet PatchRadar.dll" in development): never register the host as the login item.
+                if (!Path.GetFileName(exePath).StartsWith("PatchRadar", StringComparison.OrdinalIgnoreCase)) return;
                 if (!IsEnabled) { key.Set(ValueName, Command); log?.Info("Run at login enabled"); }
             }
             else if (key.Get(ValueName) is not null)

@@ -321,6 +321,14 @@ public class AutostartTests
     }
 
     [Fact]
+    public void Enable_Skips_NonPatchRadarHost()
+    {
+        var k = new FakeKey();
+        new Autostart(k, @"C:\Program Files\dotnet\dotnet.exe").Apply(true);
+        Assert.Null(k.Get(Autostart.ValueName));
+    }
+
+    [Fact]
     public void Disable_WhenAbsent_IsHarmless() => new Autostart(new FakeKey(), "x").Apply(false);
 
     [Fact]

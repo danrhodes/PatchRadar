@@ -87,15 +87,19 @@ public partial class App : Application
         var postUpdate = args.Contains("--post-update") || args.Contains(CrashRestart.Argument);
 
         // Run from anywhere else: install into AppData (or --customdir) so self-updates have a stable home, then delete the download.
+        // --post-update is NOT skipped: an update that landed in C:\tools (old install, versioned name) migrates to AppData here.
         var customDir = SelfInstall.ParseCustomDir(args);
-        if (!postUpdate && !args.Contains(SelfInstall.RelocatedArgument) && !System.Diagnostics.Debugger.IsAttached
+        var savedDir = SelfInstall.ReadSavedCustomDir();
+        var crashRestart = args.Contains(CrashRestart.Argument);
+        if (!crashRestart && !args.Contains(SelfInstall.RelocatedArgument) && !System.Diagnostics.Debugger.IsAttached
             && Environment.ProcessPath is { } self
-            && SelfInstall.ShouldRelocate(self, customDir, customDir is null ? SelfInstall.ReadSavedCustomDir() : null))
+            && SelfInstall.ShouldRelocate(self, customDir, customDir is null ? savedDir : null))
         {
+            customDir = SelfInstall.EffectiveCustomDir(self, customDir, savedDir);
             var moved = SelfInstall.Relocate(self, customDir, _log);
             if (moved.Outcome is SelfInstall.Outcome.Relocated or SelfInstall.Outcome.UsedExisting)
             {
-                MessageBox.Show(
+                if (!postUpdate) MessageBox.Show(
                     "PatchRadar has installed itself to:\n" + SelfInstall.TargetDirectory(customDir) +
                     "\n\nThe original copy will now be deleted, and PatchRadar will keep updating itself from the new location. " +
                     "You can start it from the tray icon, or it will start with Windows.",
@@ -194,7 +198,15 @@ public partial class App : Application
 
         var uninstall = new UninstallService(new UninstallPlanner(new RegistryCbsPackageSource()), new UacRunner(), new WindowsPrivilegeInfo(),
             new UninstallAudit(Paths.UninstallAuditFile, _log), () => host.Current, () => scan.InstalledUpdates, _log);
-        tray = _tray = new TrayController(scan, host, toasts, new DigestStore(state), _updates, _log, uninstall, new PendingSeenStore(state), new RebootReminder(state), new WatchStore(state));
+        tray = _tray = new TrayController(scan, host, toasts, new DigestStore(state), _updates, _log, uninstall, new PendingSeenStore(state), new RebootReminder(state), new WatchStore(state), state);
+        // A release is out once Microsoft has published its release-health status page: 200 yes, 404 no, anything else means "cannot tell".
+        _tray.ReleaseExists = async (release, ct) =>
+        {
+            using var resp = await _supportClient.Get().GetAsync(ReleaseHealthPages.Windows11ReleaseUrl(release), HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
+            return resp.StatusCode == System.Net.HttpStatusCode.OK ? true
+                : resp.StatusCode == System.Net.HttpStatusCode.NotFound ? false
+                : throw new HttpRequestException($"HTTP {(int)resp.StatusCode} for the {release} status page");
+        };
         _tray.Start();
         _updates.Start();
         StartProblemWatcher(host, tray);
@@ -297,7 +309,7 @@ public partial class App : Application
         var webView = new WebViewSource(new WebView2Renderer(Paths.WebViewDir, log), gate, () => host.Current.Advanced.EnableWebView2Fallback, log);
         var fetcher = new KbFetcher(new IKbSource[] { source, webView, releaseHealth }, cache, log, enrichers: new IKbEnricher[] { releaseHealth });
         var history = new UpdateCollector(new IUpdateHistoryProvider[] { new WuaHistoryProvider(), new QfeProvider() }, log);
-        return new ScanService(history, fetcher, () => host.Current, log, reviews, new WuaPendingProvider(), ignores, new RegistryRestartDetector());
+        return new ScanService(history, fetcher, () => host.Current, log, reviews, new WuaPendingProvider(log), ignores, new RegistryRestartDetector());
     }
 
     /// <summary>

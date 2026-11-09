@@ -125,6 +125,9 @@ public static class ReleaseHealthPages
 {
     private const string Root = "https://learn.microsoft.com/en-us/windows/release-health/";
 
+    /// <summary>Status page for a Windows 11 feature release such as "26H2". Microsoft publishes it when the release ships.</summary>
+    public static string Windows11ReleaseUrl(string release) => $"{Root}status-windows-11-{release.ToLowerInvariant()}";
+
     /// <summary>Status page(s) for this OS. Empty when the OS is not one we know (never guess a URL).</summary>
     public static IReadOnlyList<string> UrlsFor(OsInfo os)
     {

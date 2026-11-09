@@ -65,10 +65,19 @@ public static class SelfInstall
     {
         if (string.IsNullOrEmpty(exePath)) return false;
         if (!Path.GetFileName(exePath).StartsWith("PatchRadar", StringComparison.OrdinalIgnoreCase)) return false;
-        if (customDir is not null) return !IsUnder(exePath, customDir);
-        if (IsUnder(exePath, InstallDirectory)) return false;
-        return !IsUnder(exePath, savedCustomDir);
+        // Release builds are single-file. A PatchRadar.dll beside the exe means a development build output (bin\Debug): never move or delete that.
+        try { if (Path.GetDirectoryName(exePath) is { Length: > 0 } d && File.Exists(Path.Combine(d, "PatchRadar.dll"))) return false; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException) { }
+        // A versioned name (PatchRadar-v1.2.1-win-x64.exe) inside the install folder is renamed to PatchRadar.exe.
+        var wrongName = !Path.GetFileName(exePath).Equals(InstalledFileName, StringComparison.OrdinalIgnoreCase);
+        if (customDir is not null) return !IsUnder(exePath, customDir) || wrongName;
+        if (IsUnder(exePath, InstallDirectory)) return wrongName;
+        return !IsUnder(exePath, savedCustomDir) || wrongName;
     }
+
+    /// <summary>The folder to install into: --customdir if given, else the remembered custom folder when running from it, else null (AppData).</summary>
+    public static string? EffectiveCustomDir(string exePath, string? customDir, string? savedCustomDir)
+        => customDir ?? (IsUnder(exePath, savedCustomDir) ? savedCustomDir : null);
 
     /// <summary>Where the exe should live: the custom folder when requested, otherwise the AppData folder.</summary>
     public static string TargetDirectory(string? customDir) => customDir is null ? InstallDirectory : Path.GetFullPath(customDir);
@@ -89,7 +98,7 @@ public static class SelfInstall
             Directory.CreateDirectory(dir);
             var target = Path.Combine(dir, InstalledFileName);
             var useExisting = false;
-            if (File.Exists(target))
+            if (File.Exists(target) && !target.Equals(Path.GetFullPath(exePath), StringComparison.OrdinalIgnoreCase))
             {
                 useExisting = Version(target) >= Version(exePath);
                 if (!useExisting)

@@ -151,6 +151,12 @@ public sealed class ScanService
                 found = await _pending.GetAsync(false, ct).ConfigureAwait(false);
             }
             var filtered = UpdateMerger.FilterPending(found, s.Updates, IsInstalled);
+            if (found.Count != filtered.Count)
+            {
+                var dropped = found.Except(filtered).Select(u => $"{u.Kb} [{u.Category}] {u.Title}");
+                _log.Info($"Pending search (online={online}) returned {found.Count}, kept {filtered.Count}; dropped: {string.Join(" | ", dropped)}");
+            }
+            else _log.Info($"Pending search (online={online}) returned {found.Count}: {string.Join(" | ", found.Select(u => u.Kb))}");
             _pendingList = filtered;
             return filtered;
         }

@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Management;
 using System.Runtime.InteropServices;
 using PatchRadar.Core;
+using PatchRadar.Infra;
 
 namespace PatchRadar.Updates;
 
@@ -80,16 +81,39 @@ public sealed class WuaHistoryProvider : IUpdateHistoryProvider
 /// Updates Windows Update knows about but has not installed. Searches Windows Update via late-bound COM: online asks Microsoft or WSUS, offline reads the
 /// local store (what Windows last detected) with no network call.
 /// </summary>
-public sealed class WuaPendingProvider : IPendingUpdateProvider
+public sealed class WuaPendingProvider(ILog? log = null) : IPendingUpdateProvider
 {
+    private const string PolicyKey = @"SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate";
+
     public Task<IReadOnlyList<InstalledUpdate>> GetAsync(bool online, CancellationToken ct) =>
         Task.Run<IReadOnlyList<InstalledUpdate>>(() => Read(online, ct), ct);
 
-    private static IReadOnlyList<InstalledUpdate> Read(bool online, CancellationToken ct)
+    /// <summary>One line naming the policy values that change what the Windows Update search can see (WSUS, deferrals, pinned release).</summary>
+    private static string DescribePolicy()
+    {
+        try
+        {
+            var parts = new List<string>();
+            foreach (var (path, names) in new[]
+            {
+                (PolicyKey, new[] { "WUServer", "DoNotConnectToWindowsUpdateInternetLocations", "SetPolicyDrivenUpdateSourceForQualityUpdates", "SetPolicyDrivenUpdateSourceForFeatureUpdates", "DeferQualityUpdates", "DeferQualityUpdatesPeriodInDays", "DeferFeatureUpdates", "ExcludeWUDriversInQualityUpdate", "TargetReleaseVersion", "ManagePreviewBuildsPolicyValue" }),
+                (PolicyKey + @"\AU", new[] { "UseWUServer", "NoAutoUpdate" }),
+            })
+            {
+                using var k = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(path);
+                if (k is null) continue;
+                foreach (var n in names) if (k.GetValue(n) is { } v) parts.Add($"{n}={v}");
+            }
+            return parts.Count == 0 ? "no Windows Update policy values set" : string.Join(", ", parts);
+        }
+        catch (Exception ex) { return "policy unreadable: " + ex.Message; }
+    }
+
+    private IReadOnlyList<InstalledUpdate> Read(bool online, CancellationToken ct)
     {
         var list = new List<InstalledUpdate>();
         var type = Type.GetTypeFromProgID("Microsoft.Update.Session");
-        if (type is null) return list;
+        if (type is null) { log?.Warn("Pending search: Microsoft.Update.Session is not registered; skipping"); return list; }
 
         object? session = null, searcher = null, result = null, updates = null;
         try
@@ -99,11 +123,16 @@ public sealed class WuaPendingProvider : IPendingUpdateProvider
             searcher = s.CreateUpdateSearcher();
             dynamic se = searcher;
             se.Online = online;
+            var sw = System.Diagnostics.Stopwatch.StartNew();
             result = se.Search("IsInstalled=0 and IsHidden=0");
             dynamic r = result;
             updates = r.Updates;
             dynamic us = updates;
             int count = us.Count;
+            string server = "?", resultCode = "?";
+            try { server = $"{se.ServerSelection}/service {se.ServiceID}"; } catch { }
+            try { resultCode = $"{r.ResultCode}"; } catch { }
+            log?.Info($"Pending search (online={online}): WUA returned {count} update(s) in {sw.ElapsedMilliseconds} ms, result code {resultCode}, server {server}; {DescribePolicy()}");
             for (var i = 0; i < count; i++)
             {
                 ct.ThrowIfCancellationRequested();
@@ -113,6 +142,7 @@ public sealed class WuaPendingProvider : IPendingUpdateProvider
                     entry = us[i];
                     dynamic e = entry;
                     string title = e.Title ?? "";
+                    try { log?.Debug($"  WUA offer: {title} | browseOnly={e.BrowseOnly} downloaded={e.IsDownloaded} mandatory={e.IsMandatory} type={e.Type}"); } catch { }
                     var kbs = new List<string>();
                     try { dynamic ids = e.KBArticleIDs; for (var j = 0; j < (int)ids.Count; j++) kbs.Add((string)ids[j]); } catch { /* optional */ }
                     var cats = new List<string>();
